@@ -49,7 +49,7 @@ CONFIG_ORCH_A2AT_APIKEY=""
 
 CONFIG_DB_PASSWORD="openan-db-password"
 CONFIG_INGRESS_HOST="openan.local"
-CONFIG_START_AGENTS_SERVER=true
+CONFIG_START_AGENTS_SERVER=false
 
 # ===== Helper Functions =====
 ask_yes_no() {
