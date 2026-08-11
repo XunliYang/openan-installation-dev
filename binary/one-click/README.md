@@ -61,6 +61,49 @@ chmod +x openan_install.sh
 
 脚本会自动完成所有下载、配置和启动工作。运行过程中会有少量交互提示（见下文），其余全自动完成。
 
+#### 4. 选择安装模式（可选）
+
+脚本支持三种安装模式，通过命令行参数指定：
+
+| 参数 | 模式 | 说明 |
+|------|------|------|
+| `--all` | 全部安装（默认） | 同时安装 registry-center 和 orchestration-center |
+| `--register` | 仅安装 registry-center | 只部署注册中心，跳过 Node.js/npm/nginx 检查 |
+| `--orchestrate` | 仅安装 orchestration-center | 只部署编排中心，会交互式询问已运行的 registry-center 地址 |
+| `-h` / `--help` | 显示帮助 | 打印用法说明并退出 |
+
+```bash
+# 示例
+./openan_install.sh                    # 安装全部（默认，等同 --all）
+./openan_install.sh --register         # 仅安装 registry-center
+./openan_install.sh --orchestrate      # 仅安装 orchestration-center
+./openan_install.sh --help             # 查看帮助
+```
+
+> 如果同时指定 `--register` 和 `--orchestrate`，脚本会视为 `--all` 并打印提示。
+>
+> `--orchestrate` 模式下，脚本会提示输入已在运行的 registry-center 的 URL（默认 `https://127.0.0.1:5000`），该 URL 将原样写入 `server.conf` 和环境变量 `AGENT_REGISTRY_URL`，不做 `https→http` 转换。
+
+**各模式执行的步骤对比：**
+
+| 步骤 | `--all` | `--register` | `--orchestrate` |
+|------|---------|--------------|-----------------|
+| Python 3.12+ 检查 | ✅ | ✅ | ✅ |
+| Node.js / npm 检查 | ✅ | ❌ 跳过 | ✅ |
+| Nginx 检查与安装 | ✅ | ❌ 跳过 | ✅ |
+| 下载 registry-center | ✅ | ✅ | ❌ 跳过 |
+| 下载 orchestration-center | ✅ | ❌ 跳过 | ✅ |
+| 配置 registry-center | ✅ | ✅ | ❌ 跳过 |
+| 配置 orchestration-center | ✅ | ❌ 跳过 | ✅ |
+| LLM 配置 | ✅ 两者都配 | ✅ 仅 registry | ✅ 仅 orchestration |
+| 询问 registry URL | ❌ 自动修复 | ❌ 不需要 | ✅ 交互式输入 |
+| Nginx 配置 | ✅ | ❌ 跳过 | ✅ /registry/ 指向用户 URL |
+| 启动 registry-center | ✅ | ✅ | ❌ |
+| 启动 orchestration 后端 | ✅ | ❌ | ✅ |
+| 启动 orchestration 前端 | ✅ | ❌ | ✅ |
+| 启动 agents 示例服务 | ✅ | ❌ | ✅ |
+| 启动 Nginx | ✅ | ❌ | ✅ |
+
 ---
 
 ### 脚本执行流程详解
@@ -119,9 +162,10 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 ```
 - 自动验证 LLM 连通性（发送测试请求）
 - 验证失败时允许重新输入或跳过
-- 将配置写入 `llm_config.json`（registry-center 和 orchestration-center 各一份）
+- 将配置写入 `llm_config.json`（根据安装模式：`--all` 写两份，`--register` 仅写 registry-center，`--orchestrate` 仅写 orchestration-center）
 - 无论是否跳过，脚本都会在 Step 3.5 结束时输出一段 bash 命令，供用户随时重新配置 LLM
-- 将 `server.conf` 中的 `agent_registry_url` 从 `https://` 修正为 `http://`（避免 SSL 版本不匹配错误）
+- `--all` 模式：将 `server.conf` 中的 `agent_registry_url` 从 `https://` 修正为 `http://`（避免 SSL 版本不匹配错误）
+- `--orchestrate` 模式：交互式询问用户已在运行的 registry-center 的 URL，原样写入 `server.conf` 和环境变量
 
 #### Step 3.7：配置 Nginx HTTPS 反向代理
 
@@ -284,6 +328,26 @@ API key [***]:
 
 ---
 
+#### 7. Registry Center URL（仅 --orchestrate 模式）
+
+```
+Enter registry center URL [https://127.0.0.1:5000]:
+```
+
+**这是什么**：在 `--orchestrate` 模式下，orchestration-center 需要连接到一个已在运行的 registry-center。脚本会要求你输入其访问地址。
+
+**默认值**：`https://127.0.0.1:5000`
+
+**你需要做什么**：
+- 直接回车使用默认值（适用于本地已运行的 registry-center）
+- 输入远程 registry-center 的实际 URL（如 `https://10.0.0.5:5000`）
+
+> 该 URL 会原样写入 `server.conf` 中的 `agent_registry_url` 和环境变量 `AGENT_REGISTRY_URL`，不做 `https→http` 转换。请确保输入的地址与 registry-center 的实际运行模式（HTTP 或 HTTPS）匹配。
+>
+> Nginx 配置中的 `/registry/` location 也会指向该 URL。
+
+---
+
 ### 服务端口与访问地址
 
 部署完成后，可通过以下地址访问各服务：
@@ -315,7 +379,7 @@ API key [***]:
 
 ### 停止服务
 
-脚本运行结束后会输出所有服务的 PID。停止方式：
+脚本运行结束后会动态输出本次实际启动的服务的 PID 和停止命令（仅列出已启动的服务）。停止方式：
 
 ```bash
 # 停止 Python 和 Node.js 服务
@@ -388,6 +452,49 @@ chmod +x openan_install.sh
 
 The script handles all downloads, configuration, and service startup automatically. There are a few interactive prompts during execution (see below); everything else is fully automated.
 
+#### 4. Choose installation mode (optional)
+
+The script supports three installation modes via command-line flags:
+
+| Flag | Mode | Description |
+|------|------|-------------|
+| `--all` | Install all (default) | Install both registry-center and orchestration-center |
+| `--register` | Registry only | Deploy only registry-center; skip Node.js/npm/nginx checks |
+| `--orchestrate` | Orchestration only | Deploy only orchestration-center; prompts for running registry URL |
+| `-h` / `--help` | Show help | Print usage and exit |
+
+```bash
+# Examples
+./openan_install.sh                    # Install everything (default, same as --all)
+./openan_install.sh --register         # Install only registry-center
+./openan_install.sh --orchestrate      # Install only orchestration-center
+./openan_install.sh --help             # Show help
+```
+
+> If both `--register` and `--orchestrate` are specified, the script treats it as `--all` and prints a notice.
+>
+> In `--orchestrate` mode, the script prompts for the URL of the running registry-center (default `https://127.0.0.1:5000`). The URL is written as-is to `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion.
+
+**Step comparison by mode:**
+
+| Step | `--all` | `--register` | `--orchestrate` |
+|------|---------|--------------|-----------------|
+| Python 3.12+ check | ✅ | ✅ | ✅ |
+| Node.js / npm check | ✅ | ❌ Skipped | ✅ |
+| Nginx check & install | ✅ | ❌ Skipped | ✅ |
+| Download registry-center | ✅ | ✅ | ❌ Skipped |
+| Download orchestration-center | ✅ | ❌ Skipped | ✅ |
+| Configure registry-center | ✅ | ✅ | ❌ Skipped |
+| Configure orchestration-center | ✅ | ❌ Skipped | ✅ |
+| LLM configuration | ✅ Both | ✅ Registry only | ✅ Orchestration only |
+| Prompt for registry URL | ❌ Auto-fix | ❌ Not needed | ✅ Interactive input |
+| Nginx configuration | ✅ | ❌ Skipped | ✅ /registry/ → user URL |
+| Start registry-center | ✅ | ✅ | ❌ |
+| Start orchestration backend | ✅ | ❌ | ✅ |
+| Start orchestration frontend | ✅ | ❌ | ✅ |
+| Start agents server | ✅ | ❌ | ✅ |
+| Start Nginx | ✅ | ❌ | ✅ |
+
 ---
 
 ### Script Execution Flow
@@ -446,9 +553,10 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 ```
 - Automatic LLM connectivity validation (sends a test request)
 - Allows re-entry or skipping on validation failure
-- Writes configuration to `llm_config.json` (one copy each for registry-center and orchestration-center)
+- Writes configuration to `llm_config.json` (mode-dependent: `--all` writes both, `--register` writes registry-center only, `--orchestrate` writes orchestration-center only)
 - Regardless of whether skipped, the script always outputs a bash command at the end of Step 3.5 for users to reconfigure LLM at any time
-- Fixes `agent_registry_url` in `server.conf` from `https://` to `http://` (avoids SSL version mismatch errors)
+- `--all` mode: Fixes `agent_registry_url` in `server.conf` from `https://` to `http://` (avoids SSL version mismatch errors)
+- `--orchestrate` mode: Interactively prompts for the running registry-center URL, written as-is to `server.conf` and environment variable
 
 #### Step 3.7: Configure Nginx HTTPS Reverse Proxy
 
@@ -611,6 +719,26 @@ API key [***]:
 
 ---
 
+#### 7. Registry Center URL (--orchestrate mode only)
+
+```
+Enter registry center URL [https://127.0.0.1:5000]:
+```
+
+**What**: In `--orchestrate` mode, the orchestration-center needs to connect to a running registry-center. The script prompts you for its URL.
+
+**Default**: `https://127.0.0.1:5000`
+
+**What to do**:
+- Press Enter for the default (for a locally running registry-center)
+- Enter the actual URL of a remote registry-center (e.g., `https://10.0.0.5:5000`)
+
+> The URL is written as-is to `agent_registry_url` in `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion. Ensure the URL matches the registry-center's actual running mode (HTTP or HTTPS).
+>
+> The Nginx `/registry/` location block also proxies to this URL.
+
+---
+
 ### Service Ports and URLs
 
 After deployment, services are accessible at the following addresses:
@@ -642,7 +770,7 @@ After deployment, services are accessible at the following addresses:
 
 ### Stopping Services
 
-The script outputs all service PIDs when finished. To stop:
+The script dynamically outputs the PIDs and stop command for services that were actually started (only lists started services). To stop:
 
 ```bash
 # Stop Python and Node.js services

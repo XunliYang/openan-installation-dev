@@ -6,6 +6,87 @@
 # =============================================================================
 set -euo pipefail
 
+# =============================================================================
+# Argument parsing: --all | --register | --orchestrate | --help
+# =============================================================================
+INSTALL_MODE="all"
+INSTALL_REGISTRY=true
+INSTALL_ORCHESTRATION=true
+USER_REGISTRY_URL=""
+
+print_usage() {
+    cat << 'USAGE_EOF'
+Usage: openan_install.sh [OPTIONS]
+
+Options:
+  --all          Install both registry-center and orchestration-center (default)
+  --register     Install only registry-center
+  --orchestrate  Install only orchestration-center (prompts for registry URL)
+  -h, --help     Show this help message and exit
+
+Examples:
+  ./openan_install.sh                 # Install everything (same as --all)
+  ./openan_install.sh --register      # Install only registry-center
+  ./openan_install.sh --orchestrate   # Install only orchestration-center
+USAGE_EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --all)
+            INSTALL_MODE="all"
+            shift
+            ;;
+        --register)
+            if [ "${INSTALL_MODE}" = "orchestrate" ]; then
+                echo "[INFO] Both --register and --orchestrate specified; treating as --all."
+                INSTALL_MODE="all"
+            else
+                INSTALL_MODE="register"
+            fi
+            shift
+            ;;
+        --orchestrate)
+            if [ "${INSTALL_MODE}" = "register" ]; then
+                echo "[INFO] Both --register and --orchestrate specified; treating as --all."
+                INSTALL_MODE="all"
+            else
+                INSTALL_MODE="orchestrate"
+            fi
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo "[ERROR] Unknown option: $1"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+case "${INSTALL_MODE}" in
+    all)
+        INSTALL_REGISTRY=true
+        INSTALL_ORCHESTRATION=true
+        ;;
+    register)
+        INSTALL_REGISTRY=true
+        INSTALL_ORCHESTRATION=false
+        ;;
+    orchestrate)
+        INSTALL_REGISTRY=false
+        INSTALL_ORCHESTRATION=true
+        ;;
+esac
+
+echo "[MODE] Install mode: ${INSTALL_MODE}"
+echo "       registry-center:       ${INSTALL_REGISTRY}"
+echo "       orchestration-center:   ${INSTALL_ORCHESTRATION}"
+echo ""
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${SCRIPT_DIR}"
 
@@ -313,27 +394,31 @@ echo "=========================================="
 # Check Python 3.12+ (auto-install if not found)
 resolve_python
 
-# Check Node.js 20.19+
-if ! command -v node >/dev/null 2>&1; then
-    echo "[ERROR] Node.js is not installed or not on PATH."
-    echo "        Please install Node.js 20.19+ from https://nodejs.org/"
-    exit 1
-fi
-NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
-NODE_MAJOR=$(echo "${NODE_VERSION}" | cut -d. -f1)
-NODE_MINOR=$(echo "${NODE_VERSION}" | cut -d. -f2)
-if [ "${NODE_MAJOR}" -lt 20 ] || { [ "${NODE_MAJOR}" -eq 20 ] && [ "${NODE_MINOR}" -lt 19 ]; }; then
-    echo "[ERROR] Node.js 20.19+ required, found v${NODE_VERSION}."
-    exit 1
-fi
-echo "  [OK] Node.js v${NODE_VERSION}"
+# Check Node.js 20.19+ (only needed for orchestration-center frontend)
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+        echo "[ERROR] Node.js is not installed or not on PATH."
+        echo "        Please install Node.js 20.19+ from https://nodejs.org/"
+        exit 1
+    fi
+    NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
+    NODE_MAJOR=$(echo "${NODE_VERSION}" | cut -d. -f1)
+    NODE_MINOR=$(echo "${NODE_VERSION}" | cut -d. -f2)
+    if [ "${NODE_MAJOR}" -lt 20 ] || { [ "${NODE_MAJOR}" -eq 20 ] && [ "${NODE_MINOR}" -lt 19 ]; }; then
+        echo "[ERROR] Node.js 20.19+ required, found v${NODE_VERSION}."
+        exit 1
+    fi
+    echo "  [OK] Node.js v${NODE_VERSION}"
 
-# Check npm
-if ! command -v npm >/dev/null 2>&1; then
-    echo "[ERROR] npm is not installed. Please install Node.js 18+ which includes npm."
-    exit 1
+    # Check npm
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "[ERROR] npm is not installed. Please install Node.js 18+ which includes npm."
+        exit 1
+    fi
+    echo "  [OK] npm $(npm --version 2>/dev/null)"
+else
+    echo "  [SKIP] Node.js/npm check skipped (not needed for registry-only install)."
 fi
-echo "  [OK] npm $(npm --version 2>/dev/null)"
 
 # Check curl and tar
 command -v curl >/dev/null 2>&1 || { echo "[ERROR] curl is not installed."; exit 1; }
@@ -465,11 +550,19 @@ setup_nginx() {
 # =============================================================================
 # Step 0.5: Check nginx (auto-install if not found)
 # =============================================================================
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 echo "=========================================="
 echo " Step 0.5: Checking nginx"
 echo "=========================================="
 setup_nginx
 echo ""
+else
+    echo "=========================================="
+    echo " Step 0.5: Checking nginx"
+    echo "=========================================="
+    echo "  [SKIP] nginx check skipped (not needed for registry-only install)."
+    echo ""
+fi
 
 # =============================================================================
 # Step 1: Prepare repositories
@@ -478,6 +571,7 @@ echo "=========================================="
 echo " Step 1: Fetching repositories"
 echo "=========================================="
 
+if [ "${INSTALL_REGISTRY}" = "true" ]; then
 if [ -d "${REGISTRY_DIR}" ] && [ -n "$(ls -A "${REGISTRY_DIR}" 2>/dev/null)" ]; then
     echo "[SKIP] registry-center already exists, skipping download..."
 else
@@ -495,7 +589,11 @@ else
     fi
     rm -f "${TMP_TAR}"
 fi
+else
+    echo "[SKIP] registry-center download skipped (--orchestrate mode)."
+fi
 
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 if [ -d "${ORCHESTRATION_DIR}" ] && [ -n "$(ls -A "${ORCHESTRATION_DIR}" 2>/dev/null)" ]; then
     echo "[SKIP] orchestration-center already exists, skipping download..."
 else
@@ -513,10 +611,14 @@ else
     fi
     rm -f "${TMP_TAR}"
 fi
+else
+    echo "[SKIP] orchestration-center download skipped (--register mode)."
+fi
 
 # =============================================================================
 # Step 2: Setup registry-center
 # =============================================================================
+if [ "${INSTALL_REGISTRY}" = "true" ]; then
 echo ""
 echo "=========================================="
 echo " Step 2: Setting up registry-center"
@@ -586,10 +688,19 @@ echo "[INIT] Running registry-center initialization..."
 printf '\n\nn\nn\nn\n\n\nn\n\n' | python -m agent_registry.init
 
 echo "[DONE] registry-center initialized."
+else
+    echo ""
+    echo "=========================================="
+    echo " Step 2: Setting up registry-center"
+    echo "=========================================="
+    echo "  [SKIP] registry-center setup skipped (--orchestrate mode)."
+    echo ""
+fi
 
 # =============================================================================
 # Step 3: Setup orchestration-center
 # =============================================================================
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 echo ""
 echo "=========================================="
 echo " Step 3: Setting up orchestration-center"
@@ -617,6 +728,14 @@ cd "${ORCHESTRATION_DIR}/workflow-designer"
 npm install --force
 
 cd "${ORCHESTRATION_DIR}"
+else
+    echo ""
+    echo "=========================================="
+    echo " Step 3: Setting up orchestration-center"
+    echo "=========================================="
+    echo "  [SKIP] orchestration-center setup skipped (--register mode)."
+    echo ""
+fi
 
 # =============================================================================
 # Step 3.5: Configure LLM API key & fix registry URL
@@ -778,7 +897,15 @@ export LLM_API_KEY
 export LLM_MODEL
 export LLM_URL
 
-for LLM_CONFIG in "${REGISTRY_DIR}/common/config/llm_config.json" "${ORCHESTRATION_DIR}/common/config/llm_config.json"; do
+# Build LLM config file list based on installation mode
+LLM_CONFIGS=()
+if [ "${INSTALL_REGISTRY}" = "true" ]; then
+    LLM_CONFIGS+=("${REGISTRY_DIR}/common/config/llm_config.json")
+fi
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    LLM_CONFIGS+=("${ORCHESTRATION_DIR}/common/config/llm_config.json")
+fi
+for LLM_CONFIG in "${LLM_CONFIGS[@]}"; do
     if [ ! -f "${LLM_CONFIG}" ]; then
         echo "  [WARN] ${LLM_CONFIG} not found, skipping."
         continue
@@ -857,21 +984,40 @@ print(f'  [OK] Updated {sys.argv[1]}')
 MANUAL_LLM_CMD
 echo ""
 
-# --- Fix agent_registry_url in server.conf (https -> http) ---
-# registry-center runs in HTTP mode; default server.conf has https which causes
-# SSL: WRONG_VERSION_NUMBER errors in orchestration-center.
+# --- Configure agent_registry_url in server.conf ---
+# In --all mode: local registry-center runs HTTP, so convert https->http.
+# In --orchestrate mode: prompt user for the remote registry URL and use it as-is.
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 SERVER_CONF="${ORCHESTRATION_DIR}/etc/conf/server.conf"
 if [ -f "${SERVER_CONF}" ]; then
-    echo "[CONFIG] Fixing agent_registry_url in server.conf (https -> http)..."
-    sed -i 's|agent_registry_url=https://|agent_registry_url=http://|' "${SERVER_CONF}"
-    echo "  [OK] server.conf agent_registry_url set to http."
+    if [ "${INSTALL_MODE}" = "orchestrate" ]; then
+        # Prompt for the running registry center's URL
+        DEFAULT_REGISTRY_URL="https://127.0.0.1:5000"
+        echo ""
+        echo "[INPUT] Orchestration-center needs to connect to a running registry-center."
+        read -r -p "        Enter registry center URL [${DEFAULT_REGISTRY_URL}]: " USER_REGISTRY_URL < /dev/tty || USER_REGISTRY_URL=""
+        USER_REGISTRY_URL="${USER_REGISTRY_URL:-${DEFAULT_REGISTRY_URL}}"
+        echo "  [OK] Registry URL set to: ${USER_REGISTRY_URL}"
+
+        # Set agent_registry_url in server.conf to user-provided value (no protocol conversion)
+        echo "[CONFIG] Setting agent_registry_url in server.conf..."
+        sed -i "s|^agent_registry_url=.*|agent_registry_url=${USER_REGISTRY_URL}|" "${SERVER_CONF}"
+        echo "  [OK] server.conf agent_registry_url set to ${USER_REGISTRY_URL}."
+    else
+        # --all mode: local registry runs HTTP, fix https->http
+        echo "[CONFIG] Fixing agent_registry_url in server.conf (https -> http)..."
+        sed -i 's|agent_registry_url=https://|agent_registry_url=http://|' "${SERVER_CONF}"
+        echo "  [OK] server.conf agent_registry_url set to http."
+    fi
 else
     echo "  [WARN] server.conf not found at ${SERVER_CONF}, skipping registry URL fix."
+fi
 fi
 
 # =============================================================================
 # Step 3.7: Configure Nginx (HTTPS reverse proxy on port 443)
 # =============================================================================
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 echo ""
 echo "=========================================="
 echo " Step 3.7: Configuring Nginx"
@@ -936,6 +1082,15 @@ server {
 }
 NGINX_EOF
 
+# In --orchestrate mode, replace the /registry/ proxy_pass with user-provided URL
+if [ "${INSTALL_MODE}" = "orchestrate" ] && [ -n "${USER_REGISTRY_URL}" ]; then
+    REGISTRY_PROXY_URL="${USER_REGISTRY_URL}"
+    # Ensure trailing slash for nginx proxy_pass
+    [[ "${REGISTRY_PROXY_URL}" != */ ]] && REGISTRY_PROXY_URL="${REGISTRY_PROXY_URL}/"
+    sed -i "s|proxy_pass http://127.0.0.1:5000/;|proxy_pass ${REGISTRY_PROXY_URL};|" "${NGINX_CONF_LOCAL}"
+    echo "  [OK] Nginx /registry/ proxy_pass set to ${REGISTRY_PROXY_URL}"
+fi
+
 # Deploy configuration to nginx conf.d
 NGINX_CONF_DEST="/etc/nginx/conf.d/openan.conf"
 run_sudo cp "${NGINX_CONF_LOCAL}" "${NGINX_CONF_DEST}"
@@ -955,6 +1110,14 @@ else
     echo "  [ERROR] nginx configuration test failed."
     exit 1
 fi
+else
+    echo ""
+    echo "=========================================="
+    echo " Step 3.7: Configuring Nginx"
+    echo "=========================================="
+    echo "  [SKIP] nginx configuration skipped (--register mode)."
+    echo ""
+fi
 
 # =============================================================================
 # Step 4: Start all services
@@ -964,7 +1127,15 @@ echo "=========================================="
 echo " Step 4: Starting all services"
 echo "=========================================="
 
+# Initialize PIDs for dynamic summary
+REGISTRY_PID=""
+OC_BACKEND_PID=""
+FRONTEND_REAL_PID=""
+AGENTS_PID=""
+NGINX_PID=""
+
 # Start registry-center (port 5000)
+if [ "${INSTALL_REGISTRY}" = "true" ]; then
 free_port 5000
 echo "[START] registry-center (http://127.0.0.1:5000)..."
 cd "${REGISTRY_DIR}"
@@ -972,18 +1143,26 @@ source venv/bin/activate
 nohup python -m agent_registry.start > "${REGISTRY_DIR}/registry-center.log" 2>&1 &
 REGISTRY_PID=$!
 echo "  PID: ${REGISTRY_PID}"
+fi
 
 # Start orchestration-center backend (port 5001)
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 free_port 5001
 echo "[START] orchestration-center backend (http://127.0.0.1:5001)..."
 cd "${ORCHESTRATION_DIR}"
 source venv/bin/activate
-export AGENT_REGISTRY_URL="http://127.0.0.1:5000"
+if [ "${INSTALL_MODE}" = "orchestrate" ] && [ -n "${USER_REGISTRY_URL}" ]; then
+    export AGENT_REGISTRY_URL="${USER_REGISTRY_URL}"
+else
+    export AGENT_REGISTRY_URL="http://127.0.0.1:5000"
+fi
 nohup python -m orchestrate.start > "${ORCHESTRATION_DIR}/backend.log" 2>&1 &
 OC_BACKEND_PID=$!
 echo "  PID: ${OC_BACKEND_PID}"
+fi
 
 # Start orchestration-center frontend (port 3003)
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 FRONTEND_PORT=3003
 free_port "${FRONTEND_PORT}"
 echo "[START] orchestration-center frontend (http://localhost:${FRONTEND_PORT})..."
@@ -1023,8 +1202,10 @@ if [ "${FRONTEND_OK}" = "false" ]; then
     echo "         --- Last 20 lines of frontend.log ---"
     tail -n 20 "${ORCHESTRATION_DIR}/frontend.log" 2>/dev/null | sed 's/^/         /'
 fi
+fi
 
 # Start agents examples server (provides sample agents for testing)
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 AGENTS_PORT=8080
 free_port "${AGENTS_PORT}"
 echo "[START] agents examples server (http://127.0.0.1:${AGENTS_PORT})..."
@@ -1033,8 +1214,10 @@ source venv/bin/activate
 nohup python -m samples.start_agents_server > "${ORCHESTRATION_DIR}/agents-server.log" 2>&1 &
 AGENTS_PID=$!
 echo "  PID: ${AGENTS_PID}"
+fi
 
 # Start nginx (HTTPS reverse proxy on port 443)
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 free_port 443
 echo "[START] nginx (https://localhost)..."
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active nginx >/dev/null 2>&1; then
@@ -1052,26 +1235,59 @@ if [ -n "${NGINX_PID}" ]; then
 else
     echo "  [WARN] Could not determine nginx master PID."
 fi
+fi
 
 # =============================================================================
-# Summary
+# Summary (dynamic — only lists services that were actually started)
 # =============================================================================
 echo ""
 echo "=========================================="
 echo " All services started!"
 echo "=========================================="
-echo " registry-center:        http://127.0.0.1:5000  (PID: ${REGISTRY_PID})"
-echo " orchestration backend:  http://127.0.0.1:5001  (PID: ${OC_BACKEND_PID})"
-echo " orchestration frontend: http://localhost:3003   (PID: ${FRONTEND_REAL_PID})"
-echo " agents examples server: http://127.0.0.1:${AGENTS_PORT}  (PID: ${AGENTS_PID})"
-echo " nginx (HTTPS):          https://localhost        (PID: ${NGINX_PID})"
+
+STOP_PIDS=""
+if [ -n "${REGISTRY_PID}" ]; then
+    echo " registry-center:        http://127.0.0.1:5000  (PID: ${REGISTRY_PID})"
+    STOP_PIDS="${REGISTRY_PID}"
+fi
+if [ -n "${OC_BACKEND_PID}" ]; then
+    echo " orchestration backend:  http://127.0.0.1:5001  (PID: ${OC_BACKEND_PID})"
+    STOP_PIDS="${STOP_PIDS} ${OC_BACKEND_PID}"
+fi
+if [ -n "${FRONTEND_REAL_PID}" ]; then
+    echo " orchestration frontend: http://localhost:3003   (PID: ${FRONTEND_REAL_PID})"
+    STOP_PIDS="${STOP_PIDS} ${FRONTEND_REAL_PID}"
+fi
+if [ -n "${AGENTS_PID}" ]; then
+    echo " agents examples server: http://127.0.0.1:8080  (PID: ${AGENTS_PID})"
+    STOP_PIDS="${STOP_PIDS} ${AGENTS_PID}"
+fi
+if [ -n "${NGINX_PID}" ]; then
+    echo " nginx (HTTPS):          https://localhost        (PID: ${NGINX_PID})"
+fi
+
 echo ""
 echo " Logs:"
-echo "   ${REGISTRY_DIR}/registry-center.log"
-echo "   ${ORCHESTRATION_DIR}/backend.log"
-echo "   ${ORCHESTRATION_DIR}/frontend.log"
-echo "   ${ORCHESTRATION_DIR}/agents-server.log"
+if [ -n "${REGISTRY_PID}" ]; then
+    echo "   ${REGISTRY_DIR}/registry-center.log"
+fi
+if [ -n "${OC_BACKEND_PID}" ]; then
+    echo "   ${ORCHESTRATION_DIR}/backend.log"
+fi
+if [ -n "${FRONTEND_REAL_PID}" ]; then
+    echo "   ${ORCHESTRATION_DIR}/frontend.log"
+fi
+if [ -n "${AGENTS_PID}" ]; then
+    echo "   ${ORCHESTRATION_DIR}/agents-server.log"
+fi
+
 echo ""
-echo " To stop all: kill ${REGISTRY_PID} ${OC_BACKEND_PID} ${FRONTEND_REAL_PID} ${AGENTS_PID}"
-echo "           nginx: run_sudo systemctl stop nginx  (or: sudo nginx -s stop)"
+# Trim leading/trailing whitespace from STOP_PIDS
+STOP_PIDS="$(echo ${STOP_PIDS})"
+if [ -n "${STOP_PIDS}" ]; then
+    echo " To stop all: kill ${STOP_PIDS}"
+fi
+if [ -n "${NGINX_PID}" ]; then
+    echo "           nginx: run_sudo systemctl stop nginx  (or: sudo nginx -s stop)"
+fi
 echo "=========================================="
