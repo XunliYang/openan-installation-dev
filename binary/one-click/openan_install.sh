@@ -761,14 +761,38 @@ detect_distro() {
 }
 
 # -----------------------------------------------------------------------------
+# Find nginx binary path, checking PATH then common sbin locations.
+# On Debian/CentOS, nginx installs to /usr/sbin which is not in non-root PATH.
+# Echoes the binary path on success; returns 1 if not found.
+# -----------------------------------------------------------------------------
+find_nginx_binary() {
+    local nginx_bin
+    local dir
+    # 1. Check PATH (works for root or if already in PATH)
+    if nginx_bin=$(command -v nginx 2>/dev/null); then
+        echo "$nginx_bin"
+        return 0
+    fi
+    # 2. Check common sbin locations (Debian/CentOS install nginx to /usr/sbin)
+    for dir in /usr/sbin /sbin; do
+        if [ -x "${dir}/nginx" ]; then
+            echo "${dir}/nginx"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# -----------------------------------------------------------------------------
 # Install nginx and openssl if not already present.
 # Uses apt (Debian/Ubuntu) or dnf/yum (CentOS/RHEL/Rocky/Alma).
 # -----------------------------------------------------------------------------
 setup_nginx() {
     local need_nginx=false
     local need_openssl=false
+    local nginx_bin=""
 
-    if ! command -v nginx >/dev/null 2>&1; then
+    if ! find_nginx_binary >/dev/null 2>&1; then
         need_nginx=true
     fi
     if ! command -v openssl >/dev/null 2>&1; then
@@ -776,7 +800,8 @@ setup_nginx() {
     fi
 
     if [ "$need_nginx" = "false" ] && [ "$need_openssl" = "false" ]; then
-        echo "  [OK] nginx $(nginx -v 2>&1 | awk '{print $3}')"
+        nginx_bin=$(find_nginx_binary)
+        echo "  [OK] nginx $("$nginx_bin" -v 2>&1 | awk '{print $3}')"
         echo "  [OK] openssl $(openssl version 2>/dev/null | awk '{print $2}')"
         return 0
     fi
@@ -818,12 +843,13 @@ setup_nginx() {
     fi
 
     # Verify installation
-    if ! command -v nginx >/dev/null 2>&1; then
+    if ! find_nginx_binary >/dev/null 2>&1; then
         echo "  [ERROR] nginx installation failed."
         echo "          Please install nginx manually."
         exit 1
     fi
-    echo "  [OK] nginx $(nginx -v 2>&1 | awk '{print $3}')"
+    nginx_bin=$(find_nginx_binary)
+    echo "  [OK] nginx $("$nginx_bin" -v 2>&1 | awk '{print $3}')"
 
     if ! command -v openssl >/dev/null 2>&1; then
         echo "  [WARN] openssl not found; SSL certificate generation may fail."

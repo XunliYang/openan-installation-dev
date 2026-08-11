@@ -1,6 +1,6 @@
 # 术语表 / Glossary
 
-本术语表涵盖 `openan_install.sh` 中涉及的自动安装机制与安装模式相关术语。
+本术语表涵盖 `openan_install.sh` 中涉及的自动安装机制、安装模式及 PATH 查找相关术语。
 
 ---
 
@@ -92,3 +92,25 @@ Node.js 的包管理器。在预编译二进制中随 Node.js 自带；在 Debia
 Step 3.5 结束时输出的 bash 命令片段，供用户随时重新配置 LLM（修改 model、url、api_key）。
 无论用户是否跳过交互式 LLM 配置，该命令都会输出。文件列表根据安装模式动态生成：
 `--all` 包含两个项目，`--register` 仅 registry-center，`--orchestrate` 仅 orchestration-center。
+
+## PATH 不对称 (PATH Asymmetry)
+
+脚本中 `run_sudo` 以 root 身份执行安装（root 的 PATH 包含 `/usr/sbin`），
+但 `command -v` 验证以当前用户身份执行（非 root 的 PATH 不含 `/usr/sbin`），
+导致安装成功但验证失败的假阴性。这是 `setup_nginx()` 中 nginx 验证误报的根因
+（见 ADR-003）。
+
+## /usr/sbin 目录 (sbin Directory)
+
+Linux 系统管理类二进制的标准安装目录。Debian 策略将系统服务（如 nginx）安装到
+`/usr/sbin`，该目录仅出现在 root 用户的默认 PATH 中，非 root 用户的 PATH 不包含。
+这是 `command -v nginx` 在非 root 身份下失败的直接原因。
+
+## find_nginx_binary()
+
+nginx 二进制路径查找辅助函数。采用两级查找策略：
+1. 先通过 `command -v nginx` 检查 PATH（覆盖 root 用户或 nginx 已在 PATH 中的情况）
+2. 再依次检查 `/usr/sbin/nginx` 和 `/sbin/nginx` 是否存在且可执行
+
+成功时 echo 二进制路径并返回 0，失败时返回 1。用于替代 `setup_nginx()` 中原有的
+`command -v nginx` 调用，解决 PATH 不对称导致的假阴性问题（见 ADR-003）。
