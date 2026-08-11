@@ -2,7 +2,7 @@
 # =============================================================================
 # Development environment setup script
 # Downloads registry-center & orchestration-center releases, creates venvs, and starts all services.
-# Prerequisites: python3.12 (>=3.12), node (>=20.19), npm, git, curl, tar
+# Prerequisites: curl, tar (required); python3.12+ & node 20.19+ & npm (auto-installed if missing)
 # =============================================================================
 set -euo pipefail
 
@@ -385,6 +385,298 @@ resolve_python() {
 }
 
 # =============================================================================
+# Node.js 20.19+ resolution functions
+# Tries: existing node → apt/dnf install (with NodeSource fallback) → prebuilt binary
+# Supports: x86_64 & aarch64, Debian/Ubuntu & CentOS/RHEL/Rocky/Alma
+# =============================================================================
+
+NODE_VERSION_TARGET="20.19.0"
+
+# Check if a given Node.js command provides version >= 20.19.
+# Echoes the version string on success; returns 1 on failure.
+check_node_version() {
+    local cmd="$1"
+    local ver
+    ver=$("$cmd" --version 2>&1 | sed 's/v//') || return 1
+    [ -n "$ver" ] || return 1
+    local major minor
+    major=$(echo "$ver" | cut -d. -f1)
+    minor=$(echo "$ver" | cut -d. -f2)
+    if [ "${major}" -gt 20 ] || { [ "${major}" -eq 20 ] && [ "${minor}" -ge 19 ]; }; then
+        echo "$ver"
+        return 0
+    fi
+    return 1
+}
+
+# Ensure npm is available; if not, attempt to install via package manager.
+# Returns 0 if npm is available, 1 otherwise.
+ensure_npm() {
+    local distro="$1"
+    if command -v npm >/dev/null 2>&1; then
+        echo "  [OK] npm $(npm --version 2>/dev/null)"
+        return 0
+    fi
+    echo "  [WARN] npm not found. Attempting to install npm..."
+    if [ "$distro" = "debian" ]; then
+        run_sudo apt-get install -y -qq npm 2>/dev/null || true
+    elif [ "$distro" = "centos" ]; then
+        local pm=""
+        command -v dnf >/dev/null 2>&1 && pm="dnf"
+        command -v yum >/dev/null 2>&1 && [ -z "$pm" ] && pm="yum"
+        [ -n "$pm" ] && run_sudo "$pm" install -y npm 2>/dev/null || true
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        echo "  [OK] npm $(npm --version 2>/dev/null)"
+        return 0
+    fi
+    return 1
+}
+
+# Try to install Node.js via apt (Debian/Ubuntu).
+# First tries default repos, then NodeSource setup_20.x as fallback.
+install_node_apt() {
+    echo "  [TRY] Attempting apt install nodejs npm..."
+    if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        echo "  [WARN] sudo not available, skipping apt install."
+        return 1
+    fi
+
+    # 1. Try default repos
+    run_sudo apt-get update -qq 2>/dev/null || true
+    run_sudo apt-get install -y -qq nodejs npm 2>/dev/null || true
+
+    if command -v node >/dev/null 2>&1; then
+        local ver
+        ver=$(check_node_version node 2>/dev/null) || true
+        if [ -n "$ver" ]; then
+            echo "  [OK] Node.js $ver installed via apt"
+            return 0
+        fi
+    fi
+
+    # 2. Try NodeSource setup_20.x
+    echo "  [TRY] Adding NodeSource repository for Node.js 20.x..."
+    if [ "$(id -u)" -eq 0 ]; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>/dev/null || true
+    else
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - 2>/dev/null || true
+    fi
+    run_sudo apt-get install -y -qq nodejs 2>/dev/null || true
+
+    if command -v node >/dev/null 2>&1; then
+        local ver2
+        ver2=$(check_node_version node 2>/dev/null) || true
+        if [ -n "$ver2" ]; then
+            echo "  [OK] Node.js $ver2 installed via NodeSource"
+            return 0
+        fi
+    fi
+
+    echo "  [WARN] apt install did not provide Node.js 20.19+."
+    return 1
+}
+
+# Try to install Node.js via dnf/yum (CentOS/RHEL/Rocky/Alma).
+# First tries default repos, then NodeSource setup_20.x as fallback.
+install_node_yum() {
+    local pkg_mgr=""
+    if command -v dnf >/dev/null 2>&1; then
+        pkg_mgr="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        pkg_mgr="yum"
+    else
+        echo "  [WARN] Neither dnf nor yum found."
+        return 1
+    fi
+
+    echo "  [TRY] Attempting $pkg_mgr install nodejs npm..."
+    if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        echo "  [WARN] sudo not available, skipping $pkg_mgr install."
+        return 1
+    fi
+
+    # 1. Try default repos
+    run_sudo "$pkg_mgr" install -y nodejs npm 2>/dev/null || true
+
+    if command -v node >/dev/null 2>&1; then
+        local ver
+        ver=$(check_node_version node 2>/dev/null) || true
+        if [ -n "$ver" ]; then
+            echo "  [OK] Node.js $ver installed via $pkg_mgr"
+            return 0
+        fi
+    fi
+
+    # 2. Try NodeSource setup_20.x
+    echo "  [TRY] Adding NodeSource repository for Node.js 20.x..."
+    if [ "$(id -u)" -eq 0 ]; then
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - 2>/dev/null || true
+    else
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo -E bash - 2>/dev/null || true
+    fi
+    run_sudo "$pkg_mgr" install -y nodejs 2>/dev/null || true
+
+    if command -v node >/dev/null 2>&1; then
+        local ver2
+        ver2=$(check_node_version node 2>/dev/null) || true
+        if [ -n "$ver2" ]; then
+            echo "  [OK] Node.js $ver2 installed via NodeSource"
+            return 0
+        fi
+    fi
+
+    echo "  [WARN] $pkg_mgr install did not provide Node.js 20.19+."
+    return 1
+}
+
+# Download a prebuilt Node.js binary from nodejs.org.
+# Works on any Linux with glibc, regardless of distribution.
+install_node_prebuilt() {
+    local node_arch="$1"
+    local INSTALL_DIR="${WORK_DIR}/.node"
+
+    command -v curl >/dev/null 2>&1 || { echo "  [ERROR] curl is required to download Node.js."; return 1; }
+    command -v tar  >/dev/null 2>&1 || { echo "  [ERROR] tar is required to extract Node.js.";  return 1; }
+
+    local download_url="https://nodejs.org/dist/v${NODE_VERSION_TARGET}/node-v${NODE_VERSION_TARGET}-linux-${node_arch}.tar.xz"
+
+    echo "  [DOWNLOAD] Fetching Node.js v${NODE_VERSION_TARGET} prebuilt binary for ${node_arch}..."
+    echo "  [DOWNLOAD] URL: $download_url"
+
+    local tmp_tar
+    tmp_tar=$(mktemp /tmp/node-XXXXXX.tar.xz)
+    if ! curl -fsSL "$download_url" -o "$tmp_tar"; then
+        echo "  [ERROR] Failed to download Node.js v${NODE_VERSION_TARGET}."
+        rm -f "$tmp_tar"
+        return 1
+    fi
+
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    tar -xJf "$tmp_tar" -C "$INSTALL_DIR" --strip-components=1
+    rm -f "$tmp_tar"
+
+    local node_bin="${INSTALL_DIR}/bin/node"
+    local npm_bin="${INSTALL_DIR}/bin/npm"
+
+    if [ ! -f "$node_bin" ]; then
+        echo "  [ERROR] Node.js binary not found after extraction."
+        return 1
+    fi
+
+    chmod +x "$node_bin"
+    [ -f "$npm_bin" ] && chmod +x "$npm_bin"
+
+    # Add to PATH for this session
+    export PATH="${INSTALL_DIR}/bin:${PATH}"
+
+    local ver
+    ver=$("$node_bin" --version 2>&1 | sed 's/v//')
+    echo "  [OK] Node.js v${ver} installed (prebuilt)"
+    echo "  [INFO] Location: ${INSTALL_DIR}"
+
+    # Verify npm (bundled with prebuilt Node.js)
+    if ! "$npm_bin" --version >/dev/null 2>&1; then
+        echo "  [ERROR] npm not available in prebuilt Node.js."
+        return 1
+    fi
+    echo "  [OK] npm $("$npm_bin" --version 2>/dev/null)"
+}
+
+# Main Node.js resolution: try existing → package manager → prebuilt download.
+resolve_node() {
+    # Detect architecture
+    local arch node_arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64)  node_arch="x64" ;;
+        aarch64|arm64) node_arch="arm64" ;;
+        *)
+            echo "[ERROR] Unsupported architecture: $arch"
+            echo "        Please install Node.js 20.19+ manually."
+            exit 1
+            ;;
+    esac
+
+    # Detect distribution (inline, matching resolve_python pattern)
+    local distro="unknown"
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "${ID:-}" in
+            debian|ubuntu) distro="debian" ;;
+            centos|rhel|rocky|almalinux|fedora|amzn|openEuler|openeuler) distro="centos" ;;
+            *)
+                case "${ID_LIKE:-}" in
+                    *debian*) distro="debian" ;;
+                    *rhel*|*fedora*|*centos*) distro="centos" ;;
+                esac
+                ;;
+        esac
+    elif [ -f /etc/debian_version ]; then
+        distro="debian"
+    elif [ -f /etc/centos-release ] || [ -f /etc/redhat-release ]; then
+        distro="centos"
+    fi
+
+    # 1. Try existing node
+    if command -v node >/dev/null 2>&1; then
+        local ver
+        ver=$(check_node_version node 2>/dev/null) || true
+        if [ -n "$ver" ]; then
+            echo "  [OK] Node.js v${ver}"
+            ensure_npm "$distro" || {
+                echo "  [ERROR] npm is not installed and could not be installed."
+                echo "          Please install npm manually."
+                exit 1
+            }
+            return 0
+        else
+            # Node exists but version < 20.19
+            local existing_ver
+            existing_ver=$(node --version 2>/dev/null | sed 's/v//')
+            echo "  [INFO] Node.js v${existing_ver} found but 20.19+ required."
+            echo "         Will attempt to install a compatible version locally..."
+        fi
+    else
+        echo "  [INFO] Node.js not found on this system."
+        echo "         Will attempt automatic installation..."
+    fi
+
+    echo "  [INFO] Architecture: $node_arch, Distribution: $distro"
+
+    # 2. Try package manager
+    if [ "$distro" = "debian" ]; then
+        install_node_apt || true
+    elif [ "$distro" = "centos" ]; then
+        install_node_yum || true
+    fi
+
+    # Check if package manager succeeded
+    if command -v node >/dev/null 2>&1; then
+        local ver
+        ver=$(check_node_version node 2>/dev/null) || true
+        if [ -n "$ver" ]; then
+            ensure_npm "$distro" || {
+                echo "  [ERROR] npm is not installed and could not be installed."
+                echo "          Please install npm manually."
+                exit 1
+            }
+            return 0
+        fi
+    fi
+
+    # 3. Fallback: download prebuilt Node.js (works on any distro with glibc)
+    echo "  [INFO] Package manager install unavailable or did not provide Node.js 20.19+."
+    echo "         Downloading prebuilt Node.js ${NODE_VERSION_TARGET} from nodejs.org..."
+    install_node_prebuilt "$node_arch" || {
+        echo "[ERROR] All Node.js installation methods failed."
+        echo "        Please install Node.js 20.19+ manually from https://nodejs.org/"
+        exit 1
+    }
+}
+
+# =============================================================================
 # Step 0: Verify prerequisites
 # =============================================================================
 echo "=========================================="
@@ -394,28 +686,9 @@ echo "=========================================="
 # Check Python 3.12+ (auto-install if not found)
 resolve_python
 
-# Check Node.js 20.19+ (only needed for orchestration-center frontend)
+# Check Node.js 20.19+ and npm (auto-install if not found, only needed for orchestration-center)
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    if ! command -v node >/dev/null 2>&1; then
-        echo "[ERROR] Node.js is not installed or not on PATH."
-        echo "        Please install Node.js 20.19+ from https://nodejs.org/"
-        exit 1
-    fi
-    NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
-    NODE_MAJOR=$(echo "${NODE_VERSION}" | cut -d. -f1)
-    NODE_MINOR=$(echo "${NODE_VERSION}" | cut -d. -f2)
-    if [ "${NODE_MAJOR}" -lt 20 ] || { [ "${NODE_MAJOR}" -eq 20 ] && [ "${NODE_MINOR}" -lt 19 ]; }; then
-        echo "[ERROR] Node.js 20.19+ required, found v${NODE_VERSION}."
-        exit 1
-    fi
-    echo "  [OK] Node.js v${NODE_VERSION}"
-
-    # Check npm
-    if ! command -v npm >/dev/null 2>&1; then
-        echo "[ERROR] npm is not installed. Please install Node.js 18+ which includes npm."
-        exit 1
-    fi
-    echo "  [OK] npm $(npm --version 2>/dev/null)"
+    resolve_node
 else
     echo "  [SKIP] Node.js/npm check skipped (not needed for registry-only install)."
 fi

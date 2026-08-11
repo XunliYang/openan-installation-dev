@@ -28,13 +28,13 @@
 |------|---------|------|
 | 操作系统 | Linux (x86_64 / aarch64) | 支持 Debian/Ubuntu、CentOS/RHEL/Rocky/Alma/openEuler |
 | Python | 3.12+ | 脚本会自动检测并尝试安装 |
-| Node.js | 20.19+ | 需手动安装 |
+| Node.js | 20.19+ | 脚本会自动检测并尝试安装 |
 | npm | 随 Node.js 附带 | — |
 | curl | 任意 | 系统自带 |
 | tar | 任意 | 系统自带 |
 | 网络连接 | 必需 | 需访问 GitHub 下载组件 Release |
 
-> 如果 Python 3.12+ 或 nginx 未安装，脚本会尝试通过包管理器自动安装，此时可能需要 **sudo 权限**。
+> 如果 Python 3.12+、Node.js 20.19+ 或 nginx 未安装，脚本会尝试通过包管理器或预编译二进制自动安装，此时可能需要 **sudo 权限**。
 
 ---
 
@@ -89,7 +89,7 @@ chmod +x openan_install.sh
 | 步骤 | `--all` | `--register` | `--orchestrate` |
 |------|---------|--------------|-----------------|
 | Python 3.12+ 检查 | ✅ | ✅ | ✅ |
-| Node.js / npm 检查 | ✅ | ❌ 跳过 | ✅ |
+| Node.js / npm 检查与安装 | ✅ | ❌ 跳过 | ✅ |
 | Nginx 检查与安装 | ✅ | ❌ 跳过 | ✅ |
 | 下载 registry-center | ✅ | ✅ | ❌ 跳过 |
 | 下载 orchestration-center | ✅ | ❌ 跳过 | ✅ |
@@ -114,8 +114,11 @@ chmod +x openan_install.sh
   - Debian/Ubuntu：`apt-get install python3.12`（含 deadsnakes PPA 回退）
   - CentOS/RHEL/Rocky/Alma/openEuler：`dnf/yum install python3.12`（含 module enable 回退）
   - 最终回退：从 [python-build-standalone](https://github.com/indygreg/python-build-standalone) 下载独立版 Python
-- **Node.js 20.19+**：检查版本，不满足则报错退出（需手动安装）
-- **npm**：检查是否存在
+- **Node.js 20.19+**：依次尝试已有 `node` 命令。若不存在或版本不足，自动检测发行版并尝试：
+  - Debian/Ubuntu：`apt-get install nodejs npm`（含 NodeSource setup_20.x 回退）
+  - CentOS/RHEL/Rocky/Alma/openEuler：`dnf/yum install nodejs npm`（含 NodeSource setup_20.x 回退）
+  - 最终回退：从 [nodejs.org](https://nodejs.org/dist/) 下载预编译二进制（v20.19.0，含 npm，安装到本地 `.node` 目录）
+- **npm**：随 Node.js 一起验证；若已有 Node.js 但缺少 npm，尝试通过包管理器安装
 - **curl / tar**：检查是否存在
 
 #### Step 0.5：检查 Nginx
@@ -198,7 +201,7 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 [sudo] password for <用户名>:
 ```
 
-**触发时机**：当脚本需要安装 Python、nginx、openssl，或操作 `/etc/nginx/` 目录时。
+**触发时机**：当脚本需要安装 Python、Node.js、npm、nginx、openssl，或操作 `/etc/nginx/` 目录时。
 
 **你需要做什么**：输入当前用户的 sudo 密码。如果你以 root 用户运行，则不会出现此提示。
 
@@ -419,13 +422,13 @@ This script deploys the full OpenAN stack on a Linux server in one command, incl
 |-----------|----------------|-------|
 | OS | Linux (x86_64 / aarch64) | Supports Debian/Ubuntu, CentOS/RHEL/Rocky/Alma/openEuler |
 | Python | 3.12+ | Auto-detected; script will attempt to install |
-| Node.js | 20.19+ | Must be installed manually |
+| Node.js | 20.19+ | Auto-detected; script will attempt to install |
 | npm | Bundled with Node.js | — |
 | curl | Any | Pre-installed |
 | tar | Any | Pre-installed |
 | Network | Required | Needs GitHub access to download component releases |
 
-> If Python 3.12+ or nginx is not installed, the script will attempt to install them via the system package manager. This may require **sudo privileges**.
+> If Python 3.12+, Node.js 20.19+, or nginx is not installed, the script will attempt to install them via the system package manager or prebuilt binaries. This may require **sudo privileges**.
 
 ---
 
@@ -480,7 +483,7 @@ The script supports three installation modes via command-line flags:
 | Step | `--all` | `--register` | `--orchestrate` |
 |------|---------|--------------|-----------------|
 | Python 3.12+ check | ✅ | ✅ | ✅ |
-| Node.js / npm check | ✅ | ❌ Skipped | ✅ |
+| Node.js / npm check & install | ✅ | ❌ Skipped | ✅ |
 | Nginx check & install | ✅ | ❌ Skipped | ✅ |
 | Download registry-center | ✅ | ✅ | ❌ Skipped |
 | Download orchestration-center | ✅ | ❌ Skipped | ✅ |
@@ -505,8 +508,11 @@ The script supports three installation modes via command-line flags:
   - Debian/Ubuntu: `apt-get install python3.12` (with deadsnakes PPA fallback)
   - CentOS/RHEL/Rocky/Alma/openEuler: `dnf/yum install python3.12` (with module enable fallback)
   - Final fallback: Download standalone Python from [python-build-standalone](https://github.com/indygreg/python-build-standalone)
-- **Node.js 20.19+**: Checks version; exits with error if not met (manual install required)
-- **npm**: Checks availability
+- **Node.js 20.19+**: Tries existing `node` command. If not found or version insufficient, auto-detects the distribution and attempts:
+  - Debian/Ubuntu: `apt-get install nodejs npm` (with NodeSource setup_20.x fallback)
+  - CentOS/RHEL/Rocky/Alma/openEuler: `dnf/yum install nodejs npm` (with NodeSource setup_20.x fallback)
+  - Final fallback: Download prebuilt binary from [nodejs.org](https://nodejs.org/dist/) (v20.19.0, includes npm, installed to local `.node` directory)
+- **npm**: Verified alongside Node.js; if Node.js exists but npm is missing, attempts to install npm via package manager
 - **curl / tar**: Checks availability
 
 #### Step 0.5: Check Nginx
@@ -589,7 +595,7 @@ During execution, the script may present the following interactive prompts. Exce
 [sudo] password for <username>:
 ```
 
-**When**: When the script needs to install Python, nginx, openssl, or modify `/etc/nginx/` directory.
+**When**: When the script needs to install Python, Node.js, npm, nginx, openssl, or modify `/etc/nginx/` directory.
 
 **What to do**: Enter your sudo password. If running as root, this prompt will not appear.
 
