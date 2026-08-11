@@ -43,8 +43,8 @@
 #### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/XunliYang/openan-installation.git
-cd openan-installation/binary/one-click
+git clone https://github.com/XunliYang/openan-installation-dev.git
+cd openan-installation-dev/binary/one-click
 ```
 
 #### 2. 赋予执行权限（如果需要）
