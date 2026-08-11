@@ -7,12 +7,13 @@
 set -euo pipefail
 
 # =============================================================================
-# Argument parsing: --all | --register | --orchestrate | --help
+# Argument parsing: --all | --register | --orchestrate | --no-sample | --help
 # =============================================================================
 INSTALL_MODE="all"
 INSTALL_REGISTRY=true
 INSTALL_ORCHESTRATION=true
 USER_REGISTRY_URL=""
+START_SAMPLE=true
 
 print_usage() {
     cat << 'USAGE_EOF'
@@ -22,12 +23,14 @@ Options:
   --all          Install both registry-center and orchestration-center (default)
   --register     Install only registry-center
   --orchestrate  Install only orchestration-center (prompts for registry URL)
+  --no-sample    Skip starting agents examples server (port 8080)
   -h, --help     Show this help message and exit
 
 Examples:
   ./openan_install.sh                 # Install everything (same as --all)
   ./openan_install.sh --register      # Install only registry-center
   ./openan_install.sh --orchestrate   # Install only orchestration-center
+  ./openan_install.sh --all --no-sample  # Install everything but skip sample agents
 USAGE_EOF
 }
 
@@ -55,6 +58,10 @@ while [ $# -gt 0 ]; do
             fi
             shift
             ;;
+        --no-sample)
+            START_SAMPLE=false
+            shift
+            ;;
         -h|--help)
             print_usage
             exit 0
@@ -75,6 +82,10 @@ case "${INSTALL_MODE}" in
     register)
         INSTALL_REGISTRY=true
         INSTALL_ORCHESTRATION=false
+        if [ "${START_SAMPLE}" = "false" ]; then
+            echo "[INFO] --no-sample has no effect in --register mode (sample requires orchestration-center)."
+            START_SAMPLE=true
+        fi
         ;;
     orchestrate)
         INSTALL_REGISTRY=false
@@ -85,6 +96,7 @@ esac
 echo "[MODE] Install mode: ${INSTALL_MODE}"
 echo "       registry-center:       ${INSTALL_REGISTRY}"
 echo "       orchestration-center:   ${INSTALL_ORCHESTRATION}"
+echo "       agents sample:         ${START_SAMPLE}"
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1478,7 +1490,7 @@ fi
 fi
 
 # Start agents examples server (provides sample agents for testing)
-if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+if [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "true" ]; then
 AGENTS_PORT=8080
 free_port "${AGENTS_PORT}"
 echo "[START] agents examples server (http://127.0.0.1:${AGENTS_PORT})..."
@@ -1487,6 +1499,8 @@ source venv/bin/activate
 nohup python -m samples.start_agents_server > "${ORCHESTRATION_DIR}/agents-server.log" 2>&1 &
 AGENTS_PID=$!
 echo "  PID: ${AGENTS_PID}"
+elif [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "false" ]; then
+echo "[SKIP] agents examples server skipped (--no-sample)."
 fi
 
 # Start nginx (HTTPS reverse proxy on port 443)
