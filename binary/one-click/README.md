@@ -166,7 +166,7 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 - 自动验证 LLM 连通性（发送测试请求）
 - 验证失败时允许重新输入或跳过
 - 将配置写入 `llm_config.json`（根据安装模式：`--all` 写两份，`--register` 仅写 registry-center，`--orchestrate` 仅写 orchestration-center）
-- 无论是否跳过，脚本都会在 Step 3.5 结束时输出一段 bash 命令，供用户随时重新配置 LLM
+- 无论是否跳过，脚本都会在 Step 3.5 结束时输出一段 bash 命令，供用户随时重新配置 LLM（输出的文件列表同样根据安装模式动态生成：`--all` 包含两个项目，`--register` 仅 registry-center，`--orchestrate` 仅 orchestration-center）
 - `--all` 模式：将 `server.conf` 中的 `agent_registry_url` 从 `https://` 修正为 `http://`（避免 SSL 版本不匹配错误）
 - `--orchestrate` 模式：交互式询问用户已在运行的 registry-center 的 URL，原样写入 `server.conf` 和环境变量
 
@@ -222,6 +222,8 @@ Skip LLM configuration and configure manually? [y/N]:
 - 输入 `y` 跳过 LLM 配置，使用默认值
 
 > 无论是否跳过，脚本都会在 Step 3.5 结束时输出一段 bash 命令，供你随时重新配置 LLM。复制后修改其中的 `MODEL`、`URL`、`API_KEY` 三个变量值，然后在终端（脚本目录下）运行即可：
+>
+> **注意**：输出的命令中的文件列表会根据安装模式自动调整。以下是 `--all` 模式（默认）的完整示例；`--register` 模式仅包含 `registry-center/common/config/llm_config.json`，`--orchestrate` 模式仅包含 `orchestration-center/common/config/llm_config.json`。
 
 ```bash
 # 脚本会输出类似以下的命令（请替换实际值后运行）：
@@ -560,7 +562,7 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 - Automatic LLM connectivity validation (sends a test request)
 - Allows re-entry or skipping on validation failure
 - Writes configuration to `llm_config.json` (mode-dependent: `--all` writes both, `--register` writes registry-center only, `--orchestrate` writes orchestration-center only)
-- Regardless of whether skipped, the script always outputs a bash command at the end of Step 3.5 for users to reconfigure LLM at any time
+- Regardless of whether skipped, the script always outputs a bash command at the end of Step 3.5 for users to reconfigure LLM at any time (the file list in the command is also mode-dependent: `--all` includes both projects, `--register` includes only registry-center, `--orchestrate` includes only orchestration-center)
 - `--all` mode: Fixes `agent_registry_url` in `server.conf` from `https://` to `http://` (avoids SSL version mismatch errors)
 - `--orchestrate` mode: Interactively prompts for the running registry-center URL, written as-is to `server.conf` and environment variable
 
@@ -616,6 +618,8 @@ Skip LLM configuration and configure manually? [y/N]:
 - Type `y` to skip LLM configuration and use defaults
 
 > Regardless of whether you skip, the script always outputs a bash command at the end of Step 3.5 for you to reconfigure the LLM at any time. Copy it, modify the `MODEL`, `URL`, and `API_KEY` variables, and run it from the script directory:
+>
+> **Note**: The file list in the printed command adjusts automatically based on installation mode. Below is the full `--all` mode (default) example; `--register` mode includes only `registry-center/common/config/llm_config.json`, and `--orchestrate` mode includes only `orchestration-center/common/config/llm_config.json`.
 
 ```bash
 # The script outputs a command like this (replace values before running):

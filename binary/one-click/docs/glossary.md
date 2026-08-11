@@ -1,6 +1,6 @@
 # 术语表 / Glossary
 
-本术语表涵盖 `openan_install.sh` 中涉及的自动安装机制相关术语。
+本术语表涵盖 `openan_install.sh` 中涉及的自动安装机制与安装模式相关术语。
 
 ---
 
@@ -64,3 +64,31 @@ Node.js 的包管理器。在预编译二进制中随 Node.js 自带；在 Debia
 
 将软件安装到脚本工作目录下（如 `${WORK_DIR}/.node`、`${WORK_DIR}/.python3.12`），
 而非系统目录（如 `/usr/local`、`/opt`）。优点：无需 sudo、不影响系统环境、目录自包含。
+
+## 安装模式 (Installation Mode)
+
+脚本通过命令行参数控制安装哪些组件。三种模式对应不同的 `INSTALL_REGISTRY` 和
+`INSTALL_ORCHESTRATION` 布尔标志组合：
+
+| 参数 | INSTALL_REGISTRY | INSTALL_ORCHESTRATION | 说明 |
+|------|-------------------|----------------------|------|
+| `--all`（默认） | true | true | 同时安装 registry-center 和 orchestration-center |
+| `--register` | true | false | 仅安装 registry-center |
+| `--orchestrate` | false | true | 仅安装 orchestration-center |
+
+所有模式相关的步骤（环境检查、下载、配置、启动）均通过这两个标志进行条件控制。
+
+## Heredoc 拆分 (Heredoc Splitting)
+
+当需要在静态 heredoc 文本中插入动态内容时，将一个 heredoc 拆分为多个段：
+- 静态头部 heredoc（单引号分隔符，零变量展开）
+- 动态中间段（使用 `echo` + 条件判断输出变量内容）
+- 静态尾部 heredoc（单引号分隔符，零变量展开）
+
+用于手动 LLM 命令输出中根据安装模式动态生成文件列表（见 ADR-002）。
+
+## 手动 LLM 命令 (Manual LLM Command)
+
+Step 3.5 结束时输出的 bash 命令片段，供用户随时重新配置 LLM（修改 model、url、api_key）。
+无论用户是否跳过交互式 LLM 配置，该命令都会输出。文件列表根据安装模式动态生成：
+`--all` 包含两个项目，`--register` 仅 registry-center，`--orchestrate` 仅 orchestration-center。

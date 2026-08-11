@@ -1234,22 +1234,46 @@ fi
 # ---------------------------------------------------------------------------
 # Always print a ready-to-run command so the user can reconfigure LLM later,
 # regardless of whether they completed interactive config or skipped it.
+# The file list is generated dynamically based on installation mode, so
+# --register only shows registry-center, --orchestrate only shows
+# orchestration-center, and --all shows both.
 # ---------------------------------------------------------------------------
 echo ""
 echo "[INFO] To reconfigure LLM at any time, copy & run the command below"
 echo "       (replace the values first, run from the script directory):"
 echo ""
-cat << 'MANUAL_LLM_CMD'
+
+# Determine project label for the comment in the printed command
+if [ "${INSTALL_REGISTRY}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    MANUAL_PROJECT_LABEL="both projects"
+elif [ "${INSTALL_REGISTRY}" = "true" ]; then
+    MANUAL_PROJECT_LABEL="registry-center"
+elif [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    MANUAL_PROJECT_LABEL="orchestration-center"
+fi
+
+cat << 'MANUAL_LLM_HEADER'
   -----------------------------------------------------------------------
   # 1. Set your LLM configuration values
   MODEL="glm-5.1"
   URL="https://open.bigmodel.cn/api/paas/v4/chat/completions"
   API_KEY="your-api-key-here"
 
-  # 2. Apply to both projects (run from the script directory)
-  for f in \
-    registry-center/common/config/llm_config.json \
-    orchestration-center/common/config/llm_config.json
+MANUAL_LLM_HEADER
+
+echo "  # 2. Apply to ${MANUAL_PROJECT_LABEL} (run from the script directory)"
+echo "  for f in \\"
+
+if [ "${INSTALL_REGISTRY}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    echo "    registry-center/common/config/llm_config.json \\"
+    echo "    orchestration-center/common/config/llm_config.json"
+elif [ "${INSTALL_REGISTRY}" = "true" ]; then
+    echo "    registry-center/common/config/llm_config.json"
+elif [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    echo "    orchestration-center/common/config/llm_config.json"
+fi
+
+cat << 'MANUAL_LLM_FOOTER'
   do
     [ -f "$f" ] || { echo "  [WARN] $f not found"; continue; }
     python3 -c "
@@ -1266,7 +1290,7 @@ print(f'  [OK] Updated {sys.argv[1]}')
 " "$f" "$MODEL" "$URL" "$API_KEY"
   done
   -----------------------------------------------------------------------
-MANUAL_LLM_CMD
+MANUAL_LLM_FOOTER
 echo ""
 
 # --- Configure agent_registry_url in server.conf ---
@@ -1575,6 +1599,6 @@ if [ -n "${STOP_PIDS}" ]; then
     echo " To stop all: kill ${STOP_PIDS}"
 fi
 if [ -n "${NGINX_PID}" ]; then
-    echo "           nginx: run_sudo systemctl stop nginx  (or: sudo nginx -s stop)"
+    echo "           nginx: sudo systemctl stop nginx  (or: sudo nginx -s stop)"
 fi
 echo "=========================================="
