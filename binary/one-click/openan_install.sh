@@ -7,13 +7,13 @@
 set -euo pipefail
 
 # =============================================================================
-# Argument parsing: --all | --register | --orchestrate | --no-sample | --help
+# Argument parsing: --all | --register | --orchestrate | --sample | --help
 # =============================================================================
 INSTALL_MODE="all"
 INSTALL_REGISTRY=true
 INSTALL_ORCHESTRATION=true
 USER_REGISTRY_URL=""
-START_SAMPLE=true
+START_SAMPLE=false
 
 print_usage() {
     cat << 'USAGE_EOF'
@@ -23,14 +23,14 @@ Options:
   --all          Install both registry-center and orchestration-center (default)
   --register     Install only registry-center
   --orchestrate  Install only orchestration-center (prompts for registry URL)
-  --no-sample    Skip starting agents examples server (port 8080)
+  --sample       Start agents examples server (port 8080, off by default)
   -h, --help     Show this help message and exit
 
 Examples:
   ./openan_install.sh                 # Install everything (same as --all)
   ./openan_install.sh --register      # Install only registry-center
   ./openan_install.sh --orchestrate   # Install only orchestration-center
-  ./openan_install.sh --all --no-sample  # Install everything but skip sample agents
+  ./openan_install.sh --all --sample      # Install everything and start sample agents
 USAGE_EOF
 }
 
@@ -58,8 +58,8 @@ while [ $# -gt 0 ]; do
             fi
             shift
             ;;
-        --no-sample)
-            START_SAMPLE=false
+        --sample)
+            START_SAMPLE=true
             shift
             ;;
         -h|--help)
@@ -82,9 +82,9 @@ case "${INSTALL_MODE}" in
     register)
         INSTALL_REGISTRY=true
         INSTALL_ORCHESTRATION=false
-        if [ "${START_SAMPLE}" = "false" ]; then
-            echo "[INFO] --no-sample has no effect in --register mode (sample requires orchestration-center)."
-            START_SAMPLE=true
+        if [ "${START_SAMPLE}" = "true" ]; then
+            echo "[INFO] --sample has no effect in --register mode (sample requires orchestration-center)."
+            START_SAMPLE=false
         fi
         ;;
     orchestrate)
@@ -1202,121 +1202,56 @@ else
     echo "  [WARN] No API key set. Edit llm_config.json manually to set chat.api_key."
 fi
 
-# Export API key as env var so Python can read it safely (avoids shell
-# escaping issues with special characters in command-line arguments)
+# Export API key as env var so configure_llm.sh can read it safely
+# (avoids API key appearing in ps output and shell history)
 export LLM_API_KEY
-export LLM_MODEL
-export LLM_URL
 
-# Build LLM config file list based on installation mode
-LLM_CONFIGS=()
-if [ "${INSTALL_REGISTRY}" = "true" ]; then
-    LLM_CONFIGS+=("${REGISTRY_DIR}/common/config/llm_config.json")
+# Map install mode to --project flag for configure_llm.sh
+case "${INSTALL_MODE}" in
+    all)          PROJECT_FLAG="all" ;;
+    register)     PROJECT_FLAG="registry" ;;
+    orchestrate)  PROJECT_FLAG="orchestration" ;;
+esac
+
+# Write LLM configuration via standalone configure_llm.sh script.
+# --no-validate: validation already done above by validate_llm().
+# API key is passed via LLM_API_KEY env var (not --api-key flag) for security.
+# If API key is empty, skip writing (user can run configure_llm.sh later).
+if [ -n "${LLM_API_KEY}" ]; then
+    echo "[CONFIG] Writing LLM configuration via configure_llm.sh..."
+    bash "${SCRIPT_DIR}/configure_llm.sh" \
+        --model "${LLM_MODEL}" \
+        --url "${LLM_URL}" \
+        --project "${PROJECT_FLAG}" \
+        --no-validate
+else
+    echo "  [WARN] No API key set. llm_config.json not updated."
+    echo "         Run configure_llm.sh later after obtaining an API key."
 fi
-if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    LLM_CONFIGS+=("${ORCHESTRATION_DIR}/common/config/llm_config.json")
-fi
-for LLM_CONFIG in "${LLM_CONFIGS[@]}"; do
-    if [ ! -f "${LLM_CONFIG}" ]; then
-        echo "  [WARN] ${LLM_CONFIG} not found, skipping."
-        continue
-    fi
-    echo "[CONFIG] Updating chat model in ${LLM_CONFIG}..."
-    python3 -c "
-import json, os, sys
-
-config_path = sys.argv[1]
-api_key = os.environ.get('LLM_API_KEY', '')
-model = os.environ.get('LLM_MODEL', '')
-url = os.environ.get('LLM_URL', '')
-
-with open(config_path, 'r', encoding='utf-8') as f:
-    config = json.load(f)
-
-if 'chat' in config:
-    config['chat']['model'] = model
-    config['chat']['url'] = url
-    if api_key:
-        config['chat']['api_key'] = api_key
-
-with open(config_path, 'w', encoding='utf-8') as f:
-    json.dump(config, f, indent=2, ensure_ascii=False)
-    f.write('\n')
-
-# Report what was written for verification
-written_key = config.get('chat', {}).get('api_key', '(missing)')
-if written_key and len(written_key) > 8:
-    display = written_key[:4] + '...' + written_key[-4:]
-else:
-    display = '***'
-print(f'  chat.api_key = {display}')
-" "${LLM_CONFIG}"
-    echo "  [OK] Chat model updated -> model=${LLM_MODEL}, url=${LLM_URL}"
-done
 else
     echo "  [INFO] LLM configuration skipped. Default values will be used."
 fi
 
 # ---------------------------------------------------------------------------
-# Always print a ready-to-run command so the user can reconfigure LLM later,
+# Always print configure_llm.sh usage so the user can reconfigure LLM later,
 # regardless of whether they completed interactive config or skipped it.
-# The file list is generated dynamically based on installation mode, so
-# --register only shows registry-center, --orchestrate only shows
-# orchestration-center, and --all shows both.
 # ---------------------------------------------------------------------------
 echo ""
-echo "[INFO] To reconfigure LLM at any time, copy & run the command below"
-echo "       (replace the values first, run from the script directory):"
+echo "[INFO] To reconfigure LLM at any time, run configure_llm.sh:"
 echo ""
-
-# Determine project label for the comment in the printed command
-if [ "${INSTALL_REGISTRY}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    MANUAL_PROJECT_LABEL="both projects"
-elif [ "${INSTALL_REGISTRY}" = "true" ]; then
-    MANUAL_PROJECT_LABEL="registry-center"
-elif [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    MANUAL_PROJECT_LABEL="orchestration-center"
-fi
-
-cat << 'MANUAL_LLM_HEADER'
-  -----------------------------------------------------------------------
-  # 1. Set your LLM configuration values
-  MODEL="glm-5.1"
-  URL="https://open.bigmodel.cn/api/paas/v4/chat/completions"
-  API_KEY="your-api-key-here"
-
-MANUAL_LLM_HEADER
-
-echo "  # 2. Apply to ${MANUAL_PROJECT_LABEL} (run from the script directory)"
-echo "  for f in \\"
-
-if [ "${INSTALL_REGISTRY}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    echo "    registry-center/common/config/llm_config.json \\"
-    echo "    orchestration-center/common/config/llm_config.json"
-elif [ "${INSTALL_REGISTRY}" = "true" ]; then
-    echo "    registry-center/common/config/llm_config.json"
-elif [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    echo "    orchestration-center/common/config/llm_config.json"
-fi
-
-cat << 'MANUAL_LLM_FOOTER'
-  do
-    [ -f "$f" ] || { echo "  [WARN] $f not found"; continue; }
-    python3 -c "
-import json, sys
-with open(sys.argv[1]) as fh:
-    c = json.load(fh)
-c['chat']['model'] = sys.argv[2]
-c['chat']['url'] = sys.argv[3]
-c['chat']['api_key'] = sys.argv[4]
-with open(sys.argv[1], 'w') as fh:
-    json.dump(c, fh, indent=2, ensure_ascii=False)
-    fh.write('\n')
-print(f'  [OK] Updated {sys.argv[1]}')
-" "$f" "$MODEL" "$URL" "$API_KEY"
-  done
-  -----------------------------------------------------------------------
-MANUAL_LLM_FOOTER
+echo "  ./configure_llm.sh --model <model> --url <url> --api-key <key>"
+echo ""
+echo "  Or set LLM_API_KEY env var (avoids key in shell history):"
+echo "  LLM_API_KEY=your-key ./configure_llm.sh --model <model> --url <url>"
+echo ""
+echo "  Options:"
+echo "    --model <name>       LLM model name (default: qwen3.6-flash)"
+echo "    --url <url>          LLM API URL (default: https://dashscope.aliyuncs.com/compatible-mode/v1)"
+echo "    --api-key <key>      API key (or LLM_API_KEY env var)"
+echo "    --project <target>   registry | orchestration | all (default: all)"
+echo "    --validate           Validate API connection (default)"
+echo "    --no-validate        Skip validation"
+echo "    -h, --help           Show help"
 echo ""
 
 # --- Configure agent_registry_url in server.conf ---
@@ -1550,7 +1485,7 @@ nohup python -m samples.start_agents_server > "${ORCHESTRATION_DIR}/agents-serve
 AGENTS_PID=$!
 echo "  PID: ${AGENTS_PID}"
 elif [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "false" ]; then
-echo "[SKIP] agents examples server skipped (--no-sample)."
+echo "[SKIP] agents examples server skipped (use --sample to enable)."
 fi
 
 # Start nginx (HTTPS reverse proxy on port 443)
@@ -1575,6 +1510,12 @@ fi
 fi
 
 # =============================================================================
+# Detect VPS IP for remote access display in summary
+# =============================================================================
+VPS_IP="$(hostname -I 2>/dev/null | awk '{print $1}')" || VPS_IP=""
+[ -z "${VPS_IP}" ] && VPS_IP="localhost"
+
+# =============================================================================
 # Summary (dynamic — only lists services that were actually started)
 # =============================================================================
 echo ""
@@ -1592,7 +1533,7 @@ if [ -n "${OC_BACKEND_PID}" ]; then
     STOP_PIDS="${STOP_PIDS} ${OC_BACKEND_PID}"
 fi
 if [ -n "${FRONTEND_REAL_PID}" ]; then
-    echo " orchestration frontend: http://localhost:3003   (PID: ${FRONTEND_REAL_PID})"
+    echo " orchestration frontend: https://${VPS_IP}  (PID: ${FRONTEND_REAL_PID})"
     STOP_PIDS="${STOP_PIDS} ${FRONTEND_REAL_PID}"
 fi
 if [ -n "${AGENTS_PID}" ]; then
@@ -1600,7 +1541,7 @@ if [ -n "${AGENTS_PID}" ]; then
     STOP_PIDS="${STOP_PIDS} ${AGENTS_PID}"
 fi
 if [ -n "${NGINX_PID}" ]; then
-    echo " nginx (HTTPS):          https://localhost        (PID: ${NGINX_PID})"
+    echo " nginx (HTTPS):          https://${VPS_IP}  (PID: ${NGINX_PID})"
 fi
 
 echo ""

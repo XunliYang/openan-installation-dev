@@ -87,11 +87,14 @@ Node.js 的包管理器。在预编译二进制中随 Node.js 自带；在 Debia
 
 用于手动 LLM 命令输出中根据安装模式动态生成文件列表（见 ADR-002）。
 
-## 手动 LLM 命令 (Manual LLM Command)
+## 手动 LLM 命令 (Manual LLM Command) — 已废弃
 
 Step 3.5 结束时输出的 bash 命令片段，供用户随时重新配置 LLM（修改 model、url、api_key）。
 无论用户是否跳过交互式 LLM 配置，该命令都会输出。文件列表根据安装模式动态生成：
 `--all` 包含两个项目，`--register` 仅 registry-center，`--orchestrate` 仅 orchestration-center。
+
+**已由 `configure_llm.sh` 替代**（见 ADR-005）。原 60 行 bash 片段被替换为
+`configure_llm.sh` 的使用说明。
 
 ## PATH 不对称 (PATH Asymmetry)
 
@@ -114,3 +117,63 @@ nginx 二进制路径查找辅助函数。采用两级查找策略：
 
 成功时 echo 二进制路径并返回 0，失败时返回 1。用于替代 `setup_nginx()` 中原有的
 `command -v nginx` 调用，解决 PATH 不对称导致的假阴性问题（见 ADR-003）。
+
+## VPS_IP
+
+Summary 输出段中用于显示远程访问 URL 的 VPS 网卡 IP 变量。通过 `hostname -I`
+获取第一个非回环 IP，失败时回退到 `localhost`。仅用于 frontend 和 nginx 两行的
+URL 显示，其余服务保持 `127.0.0.1`（因 `--register` 模式无 nginx 代理，
+直接显示内网地址更准确）（见 ADR-004）。
+
+## 远程访问入口 (Remote Access Entry Point)
+
+nginx 反向代理是 VPS 部署中唯一的远程访问入口。所有后端服务（registry-center、
+orchestration backend、frontend、agents server）均绑定在 `127.0.0.1`，外部无法
+直连。nginx 监听 `0.0.0.0:443`，通过路径前缀代理到各服务：
+`/` → frontend、`/api/orchestrate/` → backend、`/registry/` → registry。
+agents server 无 nginx 代理，远程不可访问（见 ADR-004）。
+
+## hostname -I
+
+Linux 命令，输出所有非回环网卡的 IP 地址（空格分隔）。与 `hostname -i`（仅输出
+回环 IP 127.0.0.1）不同，`-I`（大写）返回实际网卡 IP。脚本中用 `awk '{print $1}'`
+取第一个 IP 作为 VPS_IP，用 `2>/dev/null` 和 `|| VPS_IP=""` 防止 `set -e` 退出
+（见 ADR-004）。
+
+## configure_llm.sh
+
+独立 LLM 配置脚本，从 `openan_install.sh` 中提取的 LLM 参数修改逻辑。通过 flag
+接收参数（`--model`、`--url`、`--api-key`、`--project`、`--validate`/`--no-validate`），
+替代了原 Step 3.5 中的手动 bash 命令输出段。支持从 `LLM_API_KEY` 环境变量读取
+API key（避免 key 出现在 shell history 中）。基于脚本自身目录（SCRIPT_DIR）查找
+`registry-center/` 和 `orchestration-center/` 项目目录（见 ADR-005）。
+
+## Flag 传入 (Flag-based Input)
+
+命令行参数传递方式，通过 `--flag value` 形式接收参数。`configure_llm.sh` 使用此
+方式接收 model、url、api_key 等参数，替代了原手动命令中的 shell 变量赋值
+（`MODEL="xxx"`）+ `for f in ... do ... done` 循环模式。优点：参数语义明确、
+支持默认值、可由其他脚本程序化调用。
+
+## API Key 环境变量回退 (API Key Env Var Fallback)
+
+`configure_llm.sh` 的安全设计：`--api-key` flag 优先，未指定时从 `LLM_API_KEY`
+环境变量读取。`openan_install.sh` 调用 `configure_llm.sh` 时不传 `--api-key` flag，
+而是通过已 `export` 的 `LLM_API_KEY` 环境变量传递，避免 API key 出现在 `ps` 输出
+和 shell history 中（见 ADR-005）。
+
+## --project 标志 (--project Flag)
+
+`configure_llm.sh` 的目标项目选择参数。可选值：`registry`（仅 registry-center）、
+`orchestration`（仅 orchestration-center）、`all`（两者都更新，默认）。与
+`openan_install.sh` 的安装模式映射：`--all` → `all`，`--register` → `registry`，
+`--orchestrate` → `orchestration`。缺失项目目录时打印 `[WARN]` 并跳过（见 ADR-005）。
+
+## venv 优先 Python 解析 (venv-first Python Resolution)
+
+`configure_llm.sh` 的 Python 命令解析策略：先尝试项目 venv 中的 Python
+（`registry-center/venv/bin/python` 或 `orchestration-center/venv/bin/python`），
+未找到时回退到系统 `python3`。与 `openan_install.sh` 的 `resolve_python()` 不同：
+后者面向安装阶段（需检测版本、自动安装），前者面向安装后运行（venv 已存在）。
+`configure_llm.sh` 仅使用标准库 `json`，不依赖 venv 中的第三方包，回退到 `python3`
+亦可正常工作（见 ADR-005）。

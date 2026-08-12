@@ -50,7 +50,7 @@ cd openan-installation-dev/binary/one-click
 #### 2. 赋予执行权限（如果需要）
 
 ```bash
-chmod +x openan_install.sh
+chmod +x openan_install.sh configure_llm.sh
 ```
 
 #### 3. 运行脚本
@@ -166,7 +166,7 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 - 自动验证 LLM 连通性（发送测试请求）
 - 验证失败时允许重新输入或跳过
 - 将配置写入 `llm_config.json`（根据安装模式：`--all` 写两份，`--register` 仅写 registry-center，`--orchestrate` 仅写 orchestration-center）
-- 无论是否跳过，脚本都会在 Step 3.5 结束时输出一段 bash 命令，供用户随时重新配置 LLM（输出的文件列表同样根据安装模式动态生成：`--all` 包含两个项目，`--register` 仅 registry-center，`--orchestrate` 仅 orchestration-center）
+- 无论是否跳过，脚本都会在 Step 3.5 结束时输出 `configure_llm.sh` 的使用说明，供用户随时重新配置 LLM（通过 `--project` 参数指定目标：`--all` 对应 `all`，`--register` 对应 `registry`，`--orchestrate` 对应 `orchestration`）
 - `--all` 模式：将 `server.conf` 中的 `agent_registry_url` 从 `https://` 修正为 `http://`（避免 SSL 版本不匹配错误）
 - `--orchestrate` 模式：交互式询问用户已在运行的 registry-center 的 URL，原样写入 `server.conf` 和环境变量
 
@@ -221,37 +221,26 @@ Skip LLM configuration and configure manually? [y/N]:
 - 直接回车（或输入 `n`）进入交互式 LLM 配置流程
 - 输入 `y` 跳过 LLM 配置，使用默认值
 
-> 无论是否跳过，脚本都会在 Step 3.5 结束时输出一段 bash 命令，供你随时重新配置 LLM。复制后修改其中的 `MODEL`、`URL`、`API_KEY` 三个变量值，然后在终端（脚本目录下）运行即可：
->
-> **注意**：输出的命令中的文件列表会根据安装模式自动调整。以下是 `--all` 模式（默认）的完整示例；`--register` 模式仅包含 `registry-center/common/config/llm_config.json`，`--orchestrate` 模式仅包含 `orchestration-center/common/config/llm_config.json`。
+> 无论是否跳过，脚本都会在 Step 3.5 结束时输出 `configure_llm.sh` 的使用说明，供你随时重新配置 LLM：
 
 ```bash
-# 脚本会输出类似以下的命令（请替换实际值后运行）：
-MODEL="glm-5.1"
-URL="https://open.bigmodel.cn/api/paas/v4/chat/completions"
-API_KEY="your-api-key-here"
+# 重新配置 LLM（在脚本目录下运行）：
+./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions --api-key your-key
 
-for f in \
-  registry-center/common/config/llm_config.json \
-  orchestration-center/common/config/llm_config.json
-do
-  [ -f "$f" ] || { echo "  [WARN] $f not found"; continue; }
-  python3 -c "
-import json, sys
-with open(sys.argv[1]) as fh:
-    c = json.load(fh)
-c['chat']['model'] = sys.argv[2]
-c['chat']['url'] = sys.argv[3]
-c['chat']['api_key'] = sys.argv[4]
-with open(sys.argv[1], 'w') as fh:
-    json.dump(c, fh, indent=2, ensure_ascii=False)
-    fh.write('\n')
-print(f'  [OK] Updated {sys.argv[1]}')
-" "$f" "$MODEL" "$URL" "$API_KEY"
-done
+# 或通过环境变量传递 API key（避免 key 出现在 shell history 中）：
+LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions
+
+# 仅更新指定项目（默认 all）：
+./configure_llm.sh --project registry --api-key your-key
+./configure_llm.sh --project orchestration --api-key your-key
+
+# 查看完整帮助：
+./configure_llm.sh --help
 ```
 
-> 如果跳过了交互式配置，LLM 相关功能将使用默认值，可能无法正常工作。请在启动服务前运行上述命令完成配置。
+> **`--project` 参数与安装模式的对应关系**：`--all` → `all`（默认），`--register` → `registry`，`--orchestrate` → `orchestration`。如果指定的项目未安装，脚本会跳过并打印警告。
+>
+> 如果跳过了交互式配置，LLM 相关功能将使用默认值，可能无法正常工作。请在启动服务前运行 `configure_llm.sh` 完成配置。
 
 ---
 
@@ -446,7 +435,7 @@ cd openan-installation/binary/one-click
 #### 2. Grant execute permission (if needed)
 
 ```bash
-chmod +x openan_install.sh
+chmod +x openan_install.sh configure_llm.sh
 ```
 
 #### 3. Run the script
@@ -562,7 +551,7 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 - Automatic LLM connectivity validation (sends a test request)
 - Allows re-entry or skipping on validation failure
 - Writes configuration to `llm_config.json` (mode-dependent: `--all` writes both, `--register` writes registry-center only, `--orchestrate` writes orchestration-center only)
-- Regardless of whether skipped, the script always outputs a bash command at the end of Step 3.5 for users to reconfigure LLM at any time (the file list in the command is also mode-dependent: `--all` includes both projects, `--register` includes only registry-center, `--orchestrate` includes only orchestration-center)
+- Regardless of whether skipped, the script always prints `configure_llm.sh` usage at the end of Step 3.5 for users to reconfigure LLM at any time (use `--project` to target specific projects: `--all` maps to `all`, `--register` maps to `registry`, `--orchestrate` maps to `orchestration`)
 - `--all` mode: Fixes `agent_registry_url` in `server.conf` from `https://` to `http://` (avoids SSL version mismatch errors)
 - `--orchestrate` mode: Interactively prompts for the running registry-center URL, written as-is to `server.conf` and environment variable
 
@@ -617,37 +606,26 @@ Skip LLM configuration and configure manually? [y/N]:
 - Press Enter (or type `n`) to enter the interactive LLM configuration flow
 - Type `y` to skip LLM configuration and use defaults
 
-> Regardless of whether you skip, the script always outputs a bash command at the end of Step 3.5 for you to reconfigure the LLM at any time. Copy it, modify the `MODEL`, `URL`, and `API_KEY` variables, and run it from the script directory:
->
-> **Note**: The file list in the printed command adjusts automatically based on installation mode. Below is the full `--all` mode (default) example; `--register` mode includes only `registry-center/common/config/llm_config.json`, and `--orchestrate` mode includes only `orchestration-center/common/config/llm_config.json`.
+> Regardless of whether you skip, the script always prints `configure_llm.sh` usage at the end of Step 3.5 for you to reconfigure the LLM at any time:
 
 ```bash
-# The script outputs a command like this (replace values before running):
-MODEL="glm-5.1"
-URL="https://open.bigmodel.cn/api/paas/v4/chat/completions"
-API_KEY="your-api-key-here"
+# Reconfigure LLM (run from the script directory):
+./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions --api-key your-key
 
-for f in \
-  registry-center/common/config/llm_config.json \
-  orchestration-center/common/config/llm_config.json
-do
-  [ -f "$f" ] || { echo "  [WARN] $f not found"; continue; }
-  python3 -c "
-import json, sys
-with open(sys.argv[1]) as fh:
-    c = json.load(fh)
-c['chat']['model'] = sys.argv[2]
-c['chat']['url'] = sys.argv[3]
-c['chat']['api_key'] = sys.argv[4]
-with open(sys.argv[1], 'w') as fh:
-    json.dump(c, fh, indent=2, ensure_ascii=False)
-    fh.write('\n')
-print(f'  [OK] Updated {sys.argv[1]}')
-" "$f" "$MODEL" "$URL" "$API_KEY"
-done
+# Or pass API key via env var (avoids key in shell history):
+LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions
+
+# Update only a specific project (default: all):
+./configure_llm.sh --project registry --api-key your-key
+./configure_llm.sh --project orchestration --api-key your-key
+
+# Show full help:
+./configure_llm.sh --help
 ```
 
-> If you skipped interactive configuration, LLM-related features will use defaults and may not work correctly. Please run the above command to configure before starting services.
+> **`--project` flag maps to installation mode**: `--all` → `all` (default), `--register` → `registry`, `--orchestrate` → `orchestration`. If the specified project is not installed, the script skips it with a warning.
+>
+> If you skipped interactive configuration, LLM-related features will use defaults and may not work correctly. Please run `configure_llm.sh` to configure before starting services.
 
 ---
 
