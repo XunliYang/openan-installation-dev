@@ -1284,6 +1284,22 @@ else
 fi
 fi
 
+# --- Sample Agents Interactive Prompt ---
+if [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "false" ]; then
+    echo ""
+    echo "[INPUT] Sample agents server provides demo agents for testing (port 8080)."
+    read -r -p "        Start sample agents server? [y/N]: " START_SAMPLE_INPUT < /dev/tty || START_SAMPLE_INPUT=""
+    case "${START_SAMPLE_INPUT}" in
+        [yY]|[yY][eE][sS])
+            START_SAMPLE=true
+            echo "  [OK] Sample agents server will be started."
+            ;;
+        *)
+            echo "  [SKIP] Sample agents server will not be started."
+            ;;
+    esac
+fi
+
 # =============================================================================
 # Step 3.7: Configure Nginx (HTTPS reverse proxy on port 443)
 # =============================================================================
