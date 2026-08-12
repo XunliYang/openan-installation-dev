@@ -24,7 +24,7 @@ data:
   DB_HOST: {{ include "openan.postgresHost" . | quote }}
   DB_PORT: {{ .Values.postgresql.port | quote }}
   DB_NAME: "orchestration_center"
-  DB_USERNAME: "opena2a_t"
+  DB_USERNAME: "openan"
 
   # Agent Registry
   AGENT_REGISTRY_URL: {{ include "openan.registryUrl" . | quote }}

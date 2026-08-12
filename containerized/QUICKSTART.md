@@ -105,6 +105,8 @@ echo "Ingress IP: $INGRESS_IP"
 ```
 
 Then add the Ingress host to your `/etc/hosts` file:
+- windows: `C:\Windows\System32\drivers\etc\hosts`
+- macOS/Linux: `/etc/hosts`
 
 ```bash
 echo "$INGRESS_IP  openan.local" | sudo tee -a /etc/hosts
@@ -150,6 +152,35 @@ When using NodePort access, you need to configure the frontend to connect to the
 * In frontend settings, set Nginx Gateway URL to: http://$NODE_IP:$NODE_PORT
 
 Note: The Nginx Gateway URL should be the same as the frontend access URL, as nginx will proxy the API requests.
+
+## Update Configuration
+
+If you missed filling in API keys during installation, or need to update LLM configuration later, use `helm upgrade` with `--reuse-values`:
+
+```bash
+# Update Registry Center API Key
+helm upgrade openan ./openan-chart \
+  -n openan \
+  --reuse-values \
+  --set registry.llm.chat.apiKey="your-api-key"
+
+# Update Orchestration Center API Keys
+helm upgrade openan ./openan-chart \
+  -n openan \
+  --reuse-values \
+  --set orchestration.llm.chat.apiKey="your-chat-api-key" \
+  --set orchestration.a2at.apiKey="your-a2at-api-key"
+
+# Update all at once
+helm upgrade openan ./openan-chart \
+  -n openan \
+  --reuse-values \
+  --set registry.llm.chat.apiKey="your-registry-key" \
+  --set orchestration.llm.chat.apiKey="your-orch-chat-key" \
+  --set orchestration.a2at.apiKey="your-orch-a2at-key"
+```
+
+`--reuse-values` preserves existing configuration and only overrides the fields you specify. Pods will restart automatically after the upgrade.
 
 ## Cleanup
 
