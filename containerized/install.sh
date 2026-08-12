@@ -111,7 +111,7 @@ ask_choice() {
 # ===== Environment Check =====
 check_docker() {
     if command -v docker &> /dev/null; then
-        local version=$(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)
+        local version=$(sudo docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)
         log_info "Docker installed: $version"
         return 0
     else
@@ -265,7 +265,7 @@ verify_installation() {
     
     case "$dep" in
         docker)
-            if docker info &> /dev/null; then
+            if sudo docker info &> /dev/null; then
                 return 0
             fi
             ;;
@@ -304,7 +304,6 @@ MISSING_DEPS=()
 FAILED_INSTALLS=()
 
 # Check each dependency
-check_docker || MISSING_DEPS+=("docker")
 check_kubectl || MISSING_DEPS+=("kubectl")
 check_helm || MISSING_DEPS+=("helm")
 
