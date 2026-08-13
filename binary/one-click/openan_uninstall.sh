@@ -73,18 +73,25 @@ run_sudo() {
 
 # =============================================================================
 # Helper: find PIDs listening on a given TCP port.
-# Tries fuser → lsof → ss in order.
+# Priority: ss -tlnp (listeners only) → lsof -sTCP:LISTEN → fuser (last resort).
+# Using ss/lsof with LISTEN filter avoids false positives from client connections
+# that fuser reports (see ADR-008).
 # Echoes space-separated PIDs on success, empty string if no process found.
 # =============================================================================
 find_pids_on_port() {
     local port="$1"
     local pids=""
-    if command -v fuser >/dev/null 2>&1; then
-        pids="$(fuser "${port}/tcp" 2>/dev/null)" || true
-    elif command -v lsof >/dev/null 2>&1; then
-        pids="$(lsof -t -i:"${port}" 2>/dev/null)" || true
-    elif command -v ss >/dev/null 2>&1; then
+    # 1. Prefer ss -tlnp (only returns listeners, not clients)
+    if command -v ss >/dev/null 2>&1; then
         pids="$(ss -tlnp 2>/dev/null | grep ":${port}\b" | grep -oE 'pid=[0-9]+' | cut -d= -f2 | tr '\n' ' ')" || true
+    fi
+    # 2. Fall back to lsof with LISTEN filter (only listeners)
+    if [ -z "${pids}" ] && command -v lsof >/dev/null 2>&1; then
+        pids="$(lsof -t -i:"${port}" -sTCP:LISTEN 2>/dev/null)" || true
+    fi
+    # 3. Last resort: fuser (returns listeners AND clients — may produce false positives)
+    if [ -z "${pids}" ] && command -v fuser >/dev/null 2>&1; then
+        pids="$(fuser "${port}/tcp" 2>/dev/null)" || true
     fi
     echo "${pids}" | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^ *//;s/ *$//'
 }
@@ -135,22 +142,32 @@ kill_pid() {
 }
 
 # =============================================================================
-# Port-to-pattern mapping for smart process identification.
-# Format: "port:pattern:label"
-# Only processes whose cmdline contains the pattern will be killed.
+# Global OpenAN process patterns.
+# If a process's cmdline matches ANY of these patterns (via grep -E),
+# it is considered an OpenAN process and will be killed regardless of
+# which port it is found on. This prevents cross-port process escape
+# where a multi-port process (e.g. samples.start_agents_server) is
+# skipped on all ports because no single per-port pattern matches.
+# See ADR-008 for details.
 # =============================================================================
-#   port  pattern          label
-#   5000  agent_registry   registry-center
-#   5001  orchestrate      orchestration backend
-#   3003  vite             orchestration frontend
-#   8080  samples          agents examples server
-#   8902  orchestrate      Assurance Agent (internal, see ADR-006)
+OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"
+
+# =============================================================================
+# Port-to-label mapping for scan display and kill logging.
+# Format: "port:label"
+# =============================================================================
+#   port  label
+#   5000  registry-center
+#   5001  orchestration backend
+#   3003  orchestration frontend
+#   8080  agents examples server
+#   8902  Assurance Agent (internal, see ADR-006)
 OPENAN_PORTS=(
-    "5000:agent_registry:registry-center"
-    "5001:orchestrate:orchestration backend"
-    "3003:vite:orchestration frontend"
-    "8080:samples:agents examples server"
-    "8902:orchestrate:Assurance Agent (internal)"
+    "5000:registry-center"
+    "5001:orchestration backend"
+    "3003:orchestration frontend"
+    "8080:agents examples server"
+    "8902:Assurance Agent (internal)"
 )
 
 # =============================================================================
@@ -159,14 +176,12 @@ OPENAN_PORTS=(
 SCAN_PROCESSES=""
 for entry in "${OPENAN_PORTS[@]}"; do
     port="${entry%%:*}"
-    rest="${entry#*:}"
-    pattern="${rest%%:*}"
-    label="${rest#*:}"
+    label="${entry#*:}"
     pids="$(find_pids_on_port "${port}")"
     if [ -n "${pids}" ]; then
         for pid in ${pids}; do
             cmdline="$(get_cmdline "${pid}")"
-            if echo "${cmdline}" | grep -q "${pattern}"; then
+            if echo "${cmdline}" | grep -qE "${OPENAN_PATTERNS}"; then
                 SCAN_PROCESSES="${SCAN_PROCESSES}  kill PID ${pid} (port ${port}, ${label})\n"
             fi
         done
@@ -249,9 +264,7 @@ echo "=========================================="
 
 for entry in "${OPENAN_PORTS[@]}"; do
     port="${entry%%:*}"
-    rest="${entry#*:}"
-    pattern="${rest%%:*}"
-    label="${rest#*:}"
+    label="${entry#*:}"
 
     pids="$(find_pids_on_port "${port}")"
     if [ -z "${pids}" ]; then
@@ -261,10 +274,10 @@ for entry in "${OPENAN_PORTS[@]}"; do
 
     for pid in ${pids}; do
         cmdline="$(get_cmdline "${pid}")"
-        if echo "${cmdline}" | grep -q "${pattern}"; then
+        if echo "${cmdline}" | grep -qE "${OPENAN_PATTERNS}"; then
             kill_pid "${pid}" "${label} (port ${port})"
         else
-            echo "  [WARN] Port ${port} (PID: ${pid}) — cmdline does not match OpenAN pattern '${pattern}'."
+            echo "  [WARN] Port ${port} (PID: ${pid}) — cmdline does not match any OpenAN pattern."
             echo "         cmdline: $(printf '%.120s' "${cmdline}")"
             echo "         Skipping to avoid killing non-OpenAN process."
         fi

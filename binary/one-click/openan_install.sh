@@ -1432,8 +1432,12 @@ echo "  PID: ${REGISTRY_PID}"
 fi
 
 # Start orchestration-center backend (port 5001)
+# Also free port 8902 — orchestrate.start internally starts an Assurance Agent
+# on 8902 (see ADR-006). A residual process on 8902 would cause the Assurance
+# Agent to fail binding, resulting in 404 on orchestration API routes (see ADR-008).
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 free_port 5001
+free_port 8902
 echo "[START] orchestration-center backend (http://127.0.0.1:5001)..."
 cd "${ORCHESTRATION_DIR}"
 source venv/bin/activate

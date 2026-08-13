@@ -254,9 +254,10 @@ registry-center 在 file 存储模式下将 agent card 持久化到 `data/agentc
 ## free_port() 端口覆盖范围 (free_port Coverage)
 
 `openan_install.sh` 中的 `free_port()` 函数（lines 718-735）在启动服务前清理被占用的
-端口，仅覆盖脚本显式启动的 5 个端口：5000、5001、3003、443、8080。**8902 不在覆盖
-范围内**——因为 8902 是 orchestration-center 内部启动的，脚本不感知。这意味着
-重新运行脚本时，残留的 8902 进程不会被脚本主动 kill（见 ADR-006）。
+端口，覆盖 6 个端口：5000、5001、3003、443、8080、**8902**。8902 于 ADR-008 中新增，
+因为 `orchestrate.start` 内部启动的 Assurance Agent 绑定 8902，残留进程会导致
+绑定失败并引发 404 错误。`free_port()` 采用无差别 kill（不检查 cmdline），与卸载
+脚本的智能识别不同——安装场景中端口上的进程几乎都是 OpenAN 自己的残留进程。
 
 ## openan_uninstall.sh
 
@@ -266,10 +267,11 @@ nginx 配置，保留环境工具（Python、Node.js、npm、nginx 二进制）�
 
 ## 智能进程识别 (Smart Process Identification)
 
-卸载脚本在 kill 端口上的进程前，检查进程命令行是否包含 OpenAN 已知模式
-（如 `agent_registry`、`orchestrate`、`vite`、`samples`）。匹配则 kill，不匹配则
-打印 `[WARN]` 并跳过，避免误杀用户在相同端口上运行的非 OpenAN 服务。与安装脚本
-的 `free_port()` 无差别 kill 不同——卸载场景中用户可能已将端口挪作他用（见 ADR-007）。
+卸载脚本在 kill 端口上的进程前，检查进程命令行是否匹配**任意** OpenAN 已知模式
+（全局 pattern 集合：`agent_registry|orchestrate|vite|samples`）。匹配任意一个即 kill，
+全部不匹配才打印 `[WARN]` 并跳过，避免误杀用户在相同端口上运行的非 OpenAN 服务。
+与安装脚本的 `free_port()` 无差别 kill 不同——卸载场景中用户可能已将端口挪作他用
+（见 ADR-007、ADR-008）。
 
 ## 环境保留策略 (Environment Preservation)
 
@@ -285,9 +287,36 @@ nginx 配置，保留环境工具（Python、Node.js、npm、nginx 二进制）�
 不同——卸载脚本的设计目标是"尽可能多清理"，即使部分文件已不存在或部分进程
 已终止，也能完成剩余清理工作（见 ADR-007）。
 
+## 跨端口进程逃逸 (Cross-port Process Escape)
+
+卸载脚本中的一种进程逃逸现象：一个多端口 OpenAN 进程（如 `samples.start_agents_server`，
+同时关联端口 5000 client 连接、8080 listener、8902 listener）在所有端口上的 pattern
+匹配均失败，导致进程永远不会被杀死。根因是 ADR-007 的"每端口单一 pattern"设计
+无法处理跨端口进程——port 5000 的 pattern 是 `agent_registry`，port 8902 的 pattern
+是 `orchestrate`，而 `start_agents_server` 的 cmdline 不包含这两个关键词。ADR-008
+通过全局 pattern 匹配修复此问题（见 ADR-008）。
+
+## 全局 Pattern 匹配 (Global Pattern Matching)
+
+ADR-008 引入的卸载脚本进程识别策略。定义全局 OpenAN pattern 集合
+（`OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"`），对每个端口上发现
+的进程，检查其 cmdline 是否匹配任意一个 pattern（`grep -qE`）。匹配任意一个即 kill，
+全部不匹配才跳过。替代了 ADR-007 的"每端口单一 pattern"设计，消除跨端口进程逃逸
+问题（见 ADR-008）。
+
+## fuser 误报 (fuser False Positive)
+
+`fuser PORT/tcp` 返回所有与端口关联的进程，包括 listener 和 client 连接。当 OpenAN
+进程（如 `start_agents_server`）作为 client 连接到另一个 OpenAN 服务（如
+registry-center port 5000）时，`fuser` 会将其误报为端口占用者，触发不必要的
+pattern 检查和 WARN 日志。ADR-008 将 `find_pids_on_port` 的优先级改为
+`ss -tlnp` → `lsof -sTCP:LISTEN` → `fuser`，前两者仅返回 listener，避免 client 误报
+（见 ADR-008）。
+
 ## 卸载端口覆盖范围 (Uninstall Port Coverage)
 
 `openan_uninstall.sh` 覆盖 6 个端口：5000、5001、3003、8080、8902、443。比安装脚本的
 `free_port()` 多覆盖 8902（Assurance Agent 内部端口），因为 8902 进程有独立 PID，
 kill 5001 的主进程不一定能终止 8902 子进程。443 由 nginx 停止逻辑单独处理
-（见 ADR-007、ADR-006）。
+（见 ADR-007、ADR-006）。自 ADR-008 起，安装脚本的 `free_port()` 也覆盖 8902，
+形成双重保险。
