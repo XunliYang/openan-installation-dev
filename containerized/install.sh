@@ -411,6 +411,14 @@ case "$choice" in
     *) CONFIG_REGISTRY=true; CONFIG_ORCHESTRATION=true ;;
 esac
 
+# Registry Center URL Configuration (when not deploying registry locally)
+if [ "$CONFIG_REGISTRY" = false ] && [ "$CONFIG_ORCHESTRATION" = true ]; then
+    echo ""
+    log_step "Registry Center Connection:"
+    log_info "Orchestration Center needs to connect to a Registry Center."
+    CONFIG_REGISTRY_URL=$(ask_input "  Registry Center URL" "https://127.0.0.1:5000")
+fi
+
 # Step 3: LLM Configuration for Registry Center
 if [ "$CONFIG_REGISTRY" = true ]; then
     echo ""
@@ -465,6 +473,12 @@ fi
 if [ "$CONFIG_ORCHESTRATION" = true ]; then
     echo "    - Orchestration Center"
     echo "    - Workflow Designer"
+fi
+
+if [ "$CONFIG_REGISTRY" = false ] && [ "$CONFIG_ORCHESTRATION" = true ] && [ -n "$CONFIG_REGISTRY_URL" ]; then
+    echo ""
+    echo "  Registry Connection:"
+    echo "    URL: $CONFIG_REGISTRY_URL"
 fi
 
 echo ""
@@ -532,6 +546,11 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
     HELM_ARGS="$HELM_ARGS --set orchestration.image.tag=$CONFIG_TAG"
     HELM_ARGS="$HELM_ARGS --set frontend.image.repository=$CONFIG_IMAGE_REGISTRY/$CONFIG_IMAGE_NAMESPACE/workflow-designer"
     HELM_ARGS="$HELM_ARGS --set frontend.image.tag=$CONFIG_TAG"
+    
+    # External Registry URL (when not deploying registry locally)
+    if [ "$CONFIG_REGISTRY" = false ] && [ -n "$CONFIG_REGISTRY_URL" ]; then
+        HELM_ARGS="$HELM_ARGS --set orchestration.agentRegistryUrl=$CONFIG_REGISTRY_URL"
+    fi
     
     # Orchestration LLM Chat
     if [ -n "$CONFIG_ORCH_CHAT_MODEL" ]; then
