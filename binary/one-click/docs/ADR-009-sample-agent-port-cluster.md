@@ -136,6 +136,58 @@ ADR-006 标记为 **"已修正 (Superseded by ADR-009)"**，保留原文不删�
 ADR-008 的修复措施（`free_port 8902`、全局 pattern 匹配、`ss -tlnp` 优先）
 方向正确但范围不足。在文末添加修正说明，指向 ADR-009 的完整修复。
 
+### 5. 安装脚本：Step 2 清理 registry-center `data/` 目录（404 的真正根因）
+
+**这是 404 问题的直接修复。** 端口清理（决策 1）是防御性措施，但 404 的
+真正原因是 `data/agentcard.json` 数据残留。
+
+#### 日志证据
+
+用户在不带 `--sample` 模式下运行时，`orchestrate.start` 日志显示：
+
+```
+registry_client: request for http://127.0.0.1:5000/.../agent-cards, status=200
+[af17435d] <-- GET /rest/v1/orchestrate/agent-cards status=404
+```
+
+registry-center 返回 200（agent card 存在），但 orchestration handler 返回 404。
+这是因为：
+1. 上一次以 `--sample` 运行时，11 个 agent 注册到 registry-center
+2. agent card 被持久化到 `registry-center/data/agentcard.json`
+3. 再次运行（不带 `--sample`）时，`data/` 目录未被清理
+4. registry-center 启动时加载残留的 agent card
+5. `orchestrate.start` 从 registry-center 拿到 agent card（200），card 中的 URL 指向
+   `127.0.0.1:8899-8907` 等端口
+6. 这些端口上的 agent 进程未启动（未指定 `--sample`）
+7. handler 无法连接任何 agent 端点 → 返回 404
+
+#### 修复
+
+在 Step 2 的 `agent_registry.init` 之前清理 `data/` 目录：
+
+```bash
+# Clean stale agent card data from a previous --sample run.
+# data/agentcard.json persists across runs and causes 404 when agents
+# are not running (see ADR-009).
+if [ -d "${REGISTRY_DIR}/data" ]; then
+    rm -rf "${REGISTRY_DIR}/data"
+    echo "  [CLEAN] Removed stale data/ directory."
+fi
+```
+
+#### 推翻 ADR-006 的决定
+
+ADR-006 原来决定**不清理** `data/` 目录，理由是"registry-center 的数据可能
+包含用户手动注册的其他 agent card，自动清理会造成数据丢失"。这个决定是
+404 问题的直接原因。
+
+本 ADR 推翻该决定，理由：
+1. `openan_install.sh` 是一键安装脚本，不是生产环境部署工具，`data/` 中的
+   agent card 几乎都是 `--sample` 运行产生的测试数据
+2. 用户手动注册的 agent card 在一键安装场景中极少见，且重新注册成本低
+3. 残留数据导致的 404 问题影响所有用户，而数据丢失只影响极少数手动注册场景
+4. 带有 `--sample` 运行时会自动重新注册全部 11 个 agent，无需保留旧数据
+
 ## 替代方案考虑
 
 | 方案 | 优点 | 缺点 | 否决原因 |

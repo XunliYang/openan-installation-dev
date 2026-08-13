@@ -250,10 +250,20 @@ agent card（除非有残留数据文件，见"Agent Card 数据残留"）（见
 ## Agent Card 数据残留 (Agent Card Data Residue)
 
 registry-center 在 file 存储模式下将 agent card 持久化到 `data/agentcard.json`。
-`openan_install.sh` 重新运行时不清理 `data/` 目录，导致上一次运行注册的 agent card
-在后续运行中仍然存在。即使 kill 了 8902 进程、甚至以 `--register` 模式重新运行
-（不启动 orchestration-center），残留的 agent card 仍会被 registry-center 加载
-并显示。彻底清除需手动删除 `registry-center/data/` 目录（见 ADR-006 "数据残留"章节）。
+
+> **修正 (ADR-009)**：ADR-006 原来决定不清理 `data/` 目录，该决定已被推翻。
+> 自 ADR-009 起，`openan_install.sh` Step 2 在 `agent_registry.init` 之前自动清理
+> `data/` 目录，消除残留数据导致的 404 问题。
+
+**残留导致 404 的机制**：上一次以 `--sample` 运行时，11 个 agent 注册到
+registry-center 并持久化。再次运行（不带 `--sample`）时，`data/agentcard.json`
+未被清理，registry-center 加载残留的 agent card。`orchestrate.start` 从
+registry-center 拿到 agent card（HTTP 200），但 card 中的 URL 指向的 agent 端点
+（8899-8907 等）未启动，handler 返回 404。
+
+**修复**：Step 2 在 `agent_registry.init` 之前执行 `rm -rf data/`，确保每次
+安装都是干净状态。带有 `--sample` 运行时会自动重新注册全部 11 个 agent
+（见 ADR-006 修正记录、ADR-009）。
 
 ## free_port() 端口覆盖范围 (free_port Coverage)
 

@@ -985,6 +985,14 @@ if [ -f "${SERVER_CONF}" ]; then
     sed -i 's|^jwk_private_key_path=.*|jwk_private_key_path=etc/ssl/server_key.pem|' "${SERVER_CONF}"
 fi
 
+# Clean stale agent card data from a previous --sample run.
+# data/agentcard.json persists across runs and causes 404 when agents
+# are not running (see ADR-009).
+if [ -d "${REGISTRY_DIR}/data" ]; then
+    rm -rf "${REGISTRY_DIR}/data"
+    echo "  [CLEAN] Removed stale data/ directory."
+fi
+
 # Run init with automated input:
 #   - IP: default (empty -> 127.0.0.1)
 #   - Port: default (empty -> 5000)
