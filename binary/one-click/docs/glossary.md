@@ -1,6 +1,7 @@
 # 术语表 / Glossary
 
-本术语表涵盖 `openan_install.sh` 中涉及的自动安装机制、安装模式及 PATH 查找相关术语。
+本术语表涵盖 `openan_install.sh` 和 `openan_uninstall.sh` 中涉及的自动安装机制、
+安装模式、卸载策略及 PATH 查找相关术语。
 
 ---
 
@@ -177,3 +178,116 @@ API key（避免 key 出现在 shell history 中）。基于脚本自身目录�
 后者面向安装阶段（需检测版本、自动安装），前者面向安装后运行（venv 已存在）。
 `configure_llm.sh` 仅使用标准库 `json`，不依赖 venv 中的第三方包，回退到 `python3`
 亦可正常工作（见 ADR-005）。
+
+## Agent Card
+
+Agent 的元数据描述符，遵循 TM Forum A2A-T 协议规范。以 JSON 格式存储于
+registry-center 中，包含 agent 的名称、描述、服务端点 URL、能力声明（capabilities）、
+技能列表（skills）、提供者信息等。registry-center 提供 REST API
+（`/rest/v1/registry-center/agent-cards`）用于 agent card 的注册（POST）、
+查询（GET）、删除（DELETE）。前端页面的 registry center 视图展示的就是已注册的
+agent card 列表（见 ADR-006）。
+
+## Assurance Agent
+
+OpenAN 平台内置的电信保障场景 A2A Agent，随 orchestration-center v1.0.0
+源码分发。其 agent card 定义位于 `orchestration-center/samples/agentcard/
+assurance_agent.json`，描述为"负责保障策略及其恢复策略的生成"。具备两个技能：
+`strategy-generation`（将赛事保障需求转换为网络需求）和 `recovery-delivery`
+（恢复保障前网络配置）。provider 为 Huawei，遵循 TM Forum A2A-T 电信扩展协议
+（Task-T、NEGOTIATION-T、DATA-NEGOTIATION-T）。在 `--all` 和 `--orchestrate`
+模式下，由 `orchestrate.start` 启动时自动注册到 registry-center，无需
+`--sample` flag（见 ADR-006）。
+
+## 端口 8902 (Port 8902)
+
+Assurance Agent 的 A2A 服务端点端口。由 `python -m orchestrate.start` 启动时
+内部拉起，监听于 `127.0.0.1:8902`，采用 HTTP+JSON 协议绑定。
+**此端口不在 `openan_install.sh` 的 Summary 输出中**——脚本仅显式启动并报告
+5000/5001/3003/443 四个端口（以及可选的 8080）。8902 是 orchestration-center
+组件内部行为，对部署脚本不可见。Nginx 配置中亦无 8902 的代理规则，该端口
+仅本地可访问（见 ADR-006）。
+
+## Agent Card 自注册 (Agent Card Self-Registration)
+
+orchestration-center 启动时的内部行为。`python -m orchestrate.start` 在启动
+编排后端（port 5001）的同时，还会：
+1. 启动内嵌的 A2A Agent 端点（port 8902）
+2. 读取种子 agent card JSON 文件（`samples/agentcard/assurance_agent.json`）
+3. 通过 `AGENT_REGISTRY_URL` 向 registry-center POST 注册 agent card
+
+此行为发生在 `openan_install.sh` 的 Step 4 启动 `orchestrate.start` 之后，
+是组件源码层面的行为，部署脚本不感知也不控制。注册后 registry-center 将
+agent card 持久化到 `data/agentcard.json`（file 存储模式）（见 ADR-006）。
+
+## 种子 Agent Card (Seed Agent Card)
+
+随组件源码分发的静态 agent card JSON 文件，位于 `orchestration-center/samples/
+agentcard/` 目录。与 `--sample` flag 控制的 `samples.start_agents_server`
+（port 8080）不同：seed agent card 是 orchestration-center 核心启动流程的一部分，
+由 `orchestrate.start` 读取并注册，不受 `--sample` 控制。
+`--sample` 启动的是额外的示例服务端点，而 seed card 定义的是 agent 的元数据
+（见 ADR-006）。
+
+## --sample 与内嵌 Agent 的区别 (--sample vs Built-in Agent)
+
+`openan_install.sh` 中一个容易混淆的概念区分：
+
+| 概念 | 控制方式 | 端口 | 启动模块 | 默认 |
+|------|---------|------|---------|------|
+| agents examples server | `--sample` flag | 8080 | `samples.start_agents_server` | 关闭 |
+| Assurance Agent（内嵌） | 无，始终启动 | 8902 | `orchestrate.start`（内部） | 开启 |
+
+`--sample` 控制的是独立的示例服务端（port 8080），用于提供额外的 demo agent。
+Assurance Agent 是 orchestration-center 核心功能的一部分，无论是否指定
+`--sample`都会启动并注册。因此即使用户运行不带 `--sample` 的
+`./openan_install.sh`，registry-center 中仍会出现 Assurance Agent（见 ADR-006）。
+
+## Agent Card 数据残留 (Agent Card Data Residue)
+
+registry-center 在 file 存储模式下将 agent card 持久化到 `data/agentcard.json`。
+`openan_install.sh` 重新运行时不清理 `data/` 目录，导致上一次运行注册的 agent card
+在后续运行中仍然存在。即使 kill 了 8902 进程、甚至以 `--register` 模式重新运行
+（不启动 orchestration-center），残留的 agent card 仍会被 registry-center 加载
+并显示。彻底清除需手动删除 `registry-center/data/` 目录（见 ADR-006 "数据残留"章节）。
+
+## free_port() 端口覆盖范围 (free_port Coverage)
+
+`openan_install.sh` 中的 `free_port()` 函数（lines 718-735）在启动服务前清理被占用的
+端口，仅覆盖脚本显式启动的 5 个端口：5000、5001、3003、443、8080。**8902 不在覆盖
+范围内**——因为 8902 是 orchestration-center 内部启动的，脚本不感知。这意味着
+重新运行脚本时，残留的 8902 进程不会被脚本主动 kill（见 ADR-006）。
+
+## openan_uninstall.sh
+
+OpenAN 卸载脚本，与 `openan_install.sh` 对称。清理安装脚本创建的项目文件、进程和
+nginx 配置，保留环境工具（Python、Node.js、npm、nginx 二进制）。支持 `--force` 跳过
+交互式确认。设计决策见 ADR-007。
+
+## 智能进程识别 (Smart Process Identification)
+
+卸载脚本在 kill 端口上的进程前，检查进程命令行是否包含 OpenAN 已知模式
+（如 `agent_registry`、`orchestrate`、`vite`、`samples`）。匹配则 kill，不匹配则
+打印 `[WARN]` 并跳过，避免误杀用户在相同端口上运行的非 OpenAN 服务。与安装脚本
+的 `free_port()` 无差别 kill 不同——卸载场景中用户可能已将端口挪作他用（见 ADR-007）。
+
+## 环境保留策略 (Environment Preservation)
+
+卸载脚本的核心设计原则：删除 OpenAN 项目文件和配置，但保留环境工具
+（Python、Node.js、npm、nginx 二进制、openssl）及安装脚本下载的 standalone 环境
+目录（`.python3.12/`、`.node/`）。这样用户重新运行 `openan_install.sh` 时可跳过
+环境安装步骤，加速重装流程（见 ADR-007）。
+
+## 容错卸载 (Fault-tolerant Uninstallation)
+
+卸载脚本使用 `set -uo pipefail`（不含 `-e`），单步失败不中断，继续执行后续步骤
+并在 Summary 中汇总结果。与安装脚本的 `set -euo pipefail`（任一步失败即中止）
+不同——卸载脚本的设计目标是"尽可能多清理"，即使部分文件已不存在或部分进程
+已终止，也能完成剩余清理工作（见 ADR-007）。
+
+## 卸载端口覆盖范围 (Uninstall Port Coverage)
+
+`openan_uninstall.sh` 覆盖 6 个端口：5000、5001、3003、8080、8902、443。比安装脚本的
+`free_port()` 多覆盖 8902（Assurance Agent 内部端口），因为 8902 进程有独立 PID，
+kill 5001 的主进程不一定能终止 8902 子进程。443 由 nginx 停止逻辑单独处理
+（见 ADR-007、ADR-006）。

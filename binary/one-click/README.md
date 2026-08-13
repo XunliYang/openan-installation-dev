@@ -1,4 +1,4 @@
-# OpenAN 一键部署脚本使用说明 / One-Click Deployment Script Guide (openan_install.sh)
+# OpenAN 一键部署与卸载脚本使用说明 / One-Click Deployment & Uninstallation Script Guide
 
 [中文](#中文) | [English](#english)
 
@@ -19,6 +19,7 @@
 - [服务端口与访问地址](#服务端口与访问地址)
 - [日志文件位置](#日志文件位置)
 - [停止服务](#停止服务)
+- [卸载 OpenAN](#卸载-openan)
 
 ---
 
@@ -50,7 +51,7 @@ cd openan-installation-dev/binary/one-click
 #### 2. 赋予执行权限（如果需要）
 
 ```bash
-chmod +x openan_install.sh configure_llm.sh
+chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
 ```
 
 #### 3. 运行脚本
@@ -101,8 +102,13 @@ chmod +x openan_install.sh configure_llm.sh
 | 启动 registry-center | ✅ | ✅ | ❌ |
 | 启动 orchestration 后端 | ✅ | ❌ | ✅ |
 | 启动 orchestration 前端 | ✅ | ❌ | ✅ |
-| 启动 agents 示例服务 | ✅ | ❌ | ✅ |
+| 启动 agents 示例服务 | ⬜ 可选 | ❌ | ⬜ 可选 |
 | 启动 Nginx | ✅ | ❌ | ✅ |
+
+> **关于 Assurance Agent**：即使不指定 `--sample`，`--all` 和 `--orchestrate` 模式下
+> registry-center 中仍会出现一个 "Assurance Agent"。这是 orchestration-center
+> 启动时内嵌注册的 agent（端口 8902），不是 agents 示例服务。详见
+> [ADR-006](./docs/ADR-006-orchestration-built-in-agent-self-registration.md)。
 
 ---
 
@@ -389,6 +395,76 @@ sudo nginx -s stop
 
 ---
 
+### 卸载 OpenAN
+
+如果需要完全卸载 OpenAN 项目（删除项目目录、停止所有进程、清理 nginx 配置），
+可以使用 `openan_uninstall.sh` 脚本。**环境工具（Python、Node.js、npm、nginx）会被保留**，
+方便下次重新安装时跳过环境准备。
+
+#### 使用方法
+
+```bash
+./openan_uninstall.sh           # 交互式确认
+./openan_uninstall.sh --force   # 跳过确认（适用于自动化场景）
+```
+
+#### 卸载内容
+
+脚本会执行以下操作：
+
+| 步骤 | 操作 | 说明 |
+|------|------|------|
+| Step 1 | kill 进程 | 按端口查找并 kill OpenAN 进程（5000/5001/3003/8080/8902），智能识别避免误杀非 OpenAN 进程 |
+| Step 2 | 停止 nginx | 三级回退：`systemctl stop` → `nginx -s stop` → `pkill nginx` |
+| Step 3 | 删除 nginx 配置 | 删除 `/etc/nginx/conf.d/openan.conf`、`/etc/nginx/ssl/` 证书、本地 `openan-nginx.conf` |
+| Step 4 | 删除项目目录 | 删除 `registry-center/` 和 `orchestration-center/` |
+
+#### 保留内容
+
+以下内容**不会被删除**，方便下次重装：
+
+- Python 3.12+（系统安装或 `.python3.12/` 目录）
+- Node.js 20.19+（系统安装或 `.node/` 目录）
+- npm
+- nginx 二进制和系统包
+- openssl
+- `configure_llm.sh`（部署仓库的一部分）
+
+#### 交互式确认
+
+运行 `./openan_uninstall.sh` 时，脚本会先扫描系统并列出将要执行的操作：
+
+```
+==========================================
+ OpenAN Uninstallation Plan
+==========================================
+
+Processes to kill:
+  kill PID 12345 (port 5000, registry-center)
+  kill PID 12346 (port 5001, orchestration backend)
+  ...
+
+Nginx to stop/clean:
+  stop nginx process (port 443)
+  delete /etc/nginx/conf.d/openan.conf
+  delete /etc/nginx/ssl/cert.pem, key.pem
+  ...
+
+Directories to delete:
+  delete /path/to/registry-center/
+  delete /path/to/orchestration-center/
+
+Environment tools (Python, Node.js, npm, nginx) will be PRESERVED.
+
+Proceed with uninstallation? [y/N]:
+```
+
+输入 `y` 确认执行，其他输入或回车则取消。使用 `--force` 可跳过此确认步骤。
+
+> 详细设计决策见 [ADR-007](./docs/ADR-007-uninstall-script.md)。
+
+---
+
 ## English
 
 This script deploys the full OpenAN stack on a Linux server in one command, including registry-center, orchestration-center backend and frontend, agents example server, and an Nginx HTTPS reverse proxy.
@@ -404,6 +480,7 @@ This script deploys the full OpenAN stack on a Linux server in one command, incl
 - [Service Ports and URLs](#service-ports-and-urls)
 - [Log File Locations](#log-file-locations)
 - [Stopping Services](#stopping-services)
+- [Uninstalling OpenAN](#uninstalling-openan)
 
 ---
 
@@ -435,7 +512,7 @@ cd openan-installation/binary/one-click
 #### 2. Grant execute permission (if needed)
 
 ```bash
-chmod +x openan_install.sh configure_llm.sh
+chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
 ```
 
 #### 3. Run the script
@@ -486,8 +563,13 @@ The script supports three installation modes via command-line flags:
 | Start registry-center | ✅ | ✅ | ❌ |
 | Start orchestration backend | ✅ | ❌ | ✅ |
 | Start orchestration frontend | ✅ | ❌ | ✅ |
-| Start agents server | ✅ | ❌ | ✅ |
+| Start agents server | ⬜ Optional | ❌ | ⬜ Optional |
 | Start Nginx | ✅ | ❌ | ✅ |
+
+> **About Assurance Agent**: Even without `--sample`, in `--all` and `--orchestrate`
+> modes, an "Assurance Agent" will appear in registry-center. This is an embedded
+> agent (port 8902) registered by orchestration-center on startup, not the agents
+> examples server. See [ADR-006](./docs/ADR-006-orchestration-built-in-agent-self-registration.md).
 
 ---
 
@@ -771,3 +853,72 @@ sudo nginx -s stop
 ```
 
 > Replace `<PID>` with the actual PIDs output at the end of the script.
+
+---
+
+### Uninstalling OpenAN
+
+To completely uninstall OpenAN projects (remove project directories, stop all processes,
+and clean nginx configuration), use the `openan_uninstall.sh` script.
+**Environment tools (Python, Node.js, npm, nginx) are preserved** for faster reinstallation.
+
+#### Usage
+
+```bash
+./openan_uninstall.sh           # Interactive confirmation
+./openan_uninstall.sh --force   # Skip confirmation (for automation)
+```
+
+#### What Gets Removed
+
+| Step | Action | Description |
+|------|--------|-------------|
+| Step 1 | Kill processes | Find and kill OpenAN processes by port (5000/5001/3003/8080/8902), with smart identification to avoid killing non-OpenAN processes |
+| Step 2 | Stop nginx | Three-level fallback: `systemctl stop` → `nginx -s stop` → `pkill nginx` |
+| Step 3 | Remove nginx config | Delete `/etc/nginx/conf.d/openan.conf`, `/etc/nginx/ssl/` certificates, local `openan-nginx.conf` |
+| Step 4 | Remove project dirs | Delete `registry-center/` and `orchestration-center/` |
+
+#### What Gets Preserved
+
+The following are **not deleted**, for faster reinstallation:
+
+- Python 3.12+ (system-installed or `.python3.12/` directory)
+- Node.js 20.19+ (system-installed or `.node/` directory)
+- npm
+- nginx binary and system package
+- openssl
+- `configure_llm.sh` (part of the deployment repo)
+
+#### Interactive Confirmation
+
+When running `./openan_uninstall.sh`, the script first scans the system and lists all
+planned actions:
+
+```
+==========================================
+ OpenAN Uninstallation Plan
+==========================================
+
+Processes to kill:
+  kill PID 12345 (port 5000, registry-center)
+  kill PID 12346 (port 5001, orchestration backend)
+  ...
+
+Nginx to stop/clean:
+  stop nginx process (port 443)
+  delete /etc/nginx/conf.d/openan.conf
+  delete /etc/nginx/ssl/cert.pem, key.pem
+  ...
+
+Directories to delete:
+  delete /path/to/registry-center/
+  delete /path/to/orchestration-center/
+
+Environment tools (Python, Node.js, npm, nginx) will be PRESERVED.
+
+Proceed with uninstallation? [y/N]:
+```
+
+Type `y` to confirm, or any other input / Enter to cancel. Use `--force` to skip this confirmation.
+
+> See [ADR-007](./docs/ADR-007-uninstall-script.md) for detailed design decisions.
