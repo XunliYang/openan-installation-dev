@@ -6,7 +6,7 @@
 
 ## 中文
 
-本脚本用于在 Linux 服务器上一键部署 OpenAN 全套服务，包括 registry-center、orchestration-center 后端与前端、agents 示例服务，以及 Nginx HTTPS 反向代理。
+本脚本用于在 Linux 服务器上一键部署 OpenAN 全套服务，包括 registry-center、orchestration-center 后端与前端、agents 示例服务，以及 Nginx HTTPS 反向代理。部署在 VPS 上时，脚本会自动检测 VPS IP 并在 Summary 中显示远程访问地址（`https://[ip-of-vps]`），用户可直接从本地浏览器访问。
 
 ---
 
@@ -109,6 +109,17 @@ chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
 > registry-center 中仍会出现一个 "Assurance Agent"。这是 orchestration-center
 > 启动时内嵌注册的 agent（端口 8902），不是 agents 示例服务。详见
 > [ADR-006](./docs/ADR-006-orchestration-built-in-agent-self-registration.md)。
+
+#### 5. 卸载（可选）
+
+如需完全卸载 OpenAN（停止所有进程、清理 nginx 配置、删除项目目录），使用卸载脚本：
+
+```bash
+./openan_uninstall.sh           # 交互式确认
+./openan_uninstall.sh --force   # 跳过确认（适用于自动化场景）
+```
+
+> 卸载脚本会**保留环境工具**（Python、Node.js、npm、nginx），方便下次重装时跳过环境准备。详见[卸载 OpenAN](#卸载-openan) 章节。
 
 ---
 
@@ -352,14 +363,18 @@ Enter registry center URL [https://127.0.0.1:5000]:
 
 部署完成后，可通过以下地址访问各服务：
 
-| 服务 | HTTP 地址 | HTTPS 地址（经 Nginx 代理） |
-|------|----------|--------------------------|
-| registry-center | http://127.0.0.1:5000 | https://localhost/registry/ |
-| orchestration 后端 | http://127.0.0.1:5001 | https://localhost/api/orchestrate/ |
-| orchestration 前端 | http://localhost:3003 | https://localhost/ |
+| 服务 | 本地访问（HTTP） | 远程访问（HTTPS，经 Nginx 代理） |
+|------|-----------------|-------------------------------|
+| registry-center | http://127.0.0.1:5000 | https://[ip-of-vps]/registry/ |
+| orchestration 后端 | http://127.0.0.1:5001 | https://[ip-of-vps]/api/orchestrate/ |
+| orchestration 前端 | http://localhost:3003 | https://[ip-of-vps]/ |
 | agents 示例服务 | http://127.0.0.1:8080 | — |
-| Nginx HTTPS 入口 | — | https://localhost |
+| Nginx HTTPS 入口 | — | https://[ip-of-vps] |
 
+> **VPS 远程访问**：当脚本在 VPS 上运行时，Summary 输出会自动检测 VPS 网卡 IP（通过 `hostname -I`）并显示 `https://[ip-of-vps]` 形式的远程访问地址。将 `[ip-of-vps]` 替换为你的 VPS 实际 IP 地址（如 `https://203.0.113.50`）。
+>
+> 所有后端服务均绑定在 `127.0.0.1`，外部无法直连。**Nginx 是唯一的远程访问入口**（监听 `0.0.0.0:443`），通过路径前缀代理到各服务：`/` → 前端、`/api/orchestrate/` → 后端、`/registry/` → registry-center。agents 示例服务无 nginx 代理，远程不可访问。
+>
 > Nginx 使用自签名证书，浏览器会提示安全警告，选择"继续访问"即可。
 
 ---
@@ -467,7 +482,7 @@ Proceed with uninstallation? [y/N]:
 
 ## English
 
-This script deploys the full OpenAN stack on a Linux server in one command, including registry-center, orchestration-center backend and frontend, agents example server, and an Nginx HTTPS reverse proxy.
+This script deploys the full OpenAN stack on a Linux server in one command, including registry-center, orchestration-center backend and frontend, agents example server, and an Nginx HTTPS reverse proxy. When deployed on a VPS, the script auto-detects the VPS IP and displays remote access URLs (`https://[ip-of-vps]`) in the summary output, accessible directly from a local browser.
 
 ---
 
@@ -570,6 +585,17 @@ The script supports three installation modes via command-line flags:
 > modes, an "Assurance Agent" will appear in registry-center. This is an embedded
 > agent (port 8902) registered by orchestration-center on startup, not the agents
 > examples server. See [ADR-006](./docs/ADR-006-orchestration-built-in-agent-self-registration.md).
+
+#### 5. Uninstall (optional)
+
+To completely uninstall OpenAN (stop all processes, clean nginx configuration, remove project directories), use the uninstall script:
+
+```bash
+./openan_uninstall.sh           # Interactive confirmation
+./openan_uninstall.sh --force   # Skip confirmation (for automation)
+```
+
+> The uninstall script **preserves environment tools** (Python, Node.js, npm, nginx) for faster reinstallation. See [Uninstalling OpenAN](#uninstalling-openan) for details.
 
 ---
 
@@ -813,14 +839,18 @@ Enter registry center URL [https://127.0.0.1:5000]:
 
 After deployment, services are accessible at the following addresses:
 
-| Service | HTTP URL | HTTPS URL (via Nginx proxy) |
-|---------|----------|------------------------------|
-| registry-center | http://127.0.0.1:5000 | https://localhost/registry/ |
-| orchestration backend | http://127.0.0.1:5001 | https://localhost/api/orchestrate/ |
-| orchestration frontend | http://localhost:3003 | https://localhost/ |
+| Service | Local Access (HTTP) | Remote Access (HTTPS, via Nginx proxy) |
+|---------|---------------------|---------------------------------------|
+| registry-center | http://127.0.0.1:5000 | https://[ip-of-vps]/registry/ |
+| orchestration backend | http://127.0.0.1:5001 | https://[ip-of-vps]/api/orchestrate/ |
+| orchestration frontend | http://localhost:3003 | https://[ip-of-vps]/ |
 | agents example server | http://127.0.0.1:8080 | — |
-| Nginx HTTPS entry | — | https://localhost |
+| Nginx HTTPS entry | — | https://[ip-of-vps] |
 
+> **VPS remote access**: When the script runs on a VPS, the Summary output auto-detects the VPS network IP (via `hostname -I`) and displays remote access URLs in the form `https://[ip-of-vps]`. Replace `[ip-of-vps]` with your actual VPS IP address (e.g., `https://203.0.113.50`).
+>
+> All backend services bind to `127.0.0.1` and cannot be accessed externally. **Nginx is the sole remote entry point** (listening on `0.0.0.0:443`), proxying to services via path prefixes: `/` → frontend, `/api/orchestrate/` → backend, `/registry/` → registry-center. The agents example server has no nginx proxy and is not remotely accessible.
+>
 > Nginx uses a self-signed certificate. Browsers will show a security warning; choose "Proceed" to continue.
 
 ---
