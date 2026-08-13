@@ -4,6 +4,12 @@
 
 已采纳 (Accepted) — 2026-08-13
 
+> **修正说明**：本 ADR 的根因分析基于 ADR-006 的错误前提（`orchestrate.start`
+> 内部启动 Assurance Agent）。实际根因是 `samples.start_agents_server` 的 11 个
+> agent 端口中 9 个未被覆盖。修复措施（`free_port 8902`）方向正确但范围不足，
+> 已被 [ADR-009](./ADR-009-sample-agent-port-cluster.md) 扩展为覆盖全部 11 个端口。
+> 原文保留作为历史记录，请以 ADR-009 为准。
+
 ## 背景
 
 用户运行 `openan_uninstall.sh` 卸载后，再次运行 `openan_install.sh` 时，orchestration
@@ -205,3 +211,24 @@ curl -k https://localhost/api/orchestrate/rest/v1/orchestrate/agent-cards
   本 ADR 扩展其覆盖范围至 8902
 - `openan_uninstall.sh` `OPENAN_PORTS` 数组（lines 148-154）— 端口-pattern
   映射，本 ADR 改为全局 pattern 匹配
+
+---
+
+## 修正记录 (2026-08-13)
+
+本 ADR 的以下结论已被 ADR-009 修正：
+
+| 原结论 | 修正后 |
+|--------|--------|
+| `orchestrate.start` 内部启动 Assurance Agent 绑定 8902 | Assurance Agent 由 `samples.start_agents_server` 启动 |
+| 8902 残留进程导致 Assurance Agent 绑定失败 → 404 | 11 个 agent 端口中 9 个未覆盖，残留进程导致部分 agent 绑定失败 → 404 |
+| `free_port 8902` 修复 8902 单端口 | 需覆盖全部 11 个端口（8899-8907, 26335, 26336） |
+
+### 保留有效的修复
+
+以下修复措施方向正确，被 ADR-009 保留并扩展：
+1. **全局 pattern 匹配** — `OPENAN_PATTERNS` 集合，替代每端口单一 pattern ✅
+2. **`ss -tlnp` 优先** — 仅返回 listener，避免 fuser client 误报 ✅
+3. **`free_port 8902`** — 方向正确但范围不足，ADR-009 扩展为 11 端口循环 ✅
+
+详见 [ADR-009](./ADR-009-sample-agent-port-cluster.md)。

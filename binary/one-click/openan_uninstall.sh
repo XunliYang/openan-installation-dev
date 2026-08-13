@@ -156,18 +156,42 @@ OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"
 # Port-to-label mapping for scan display and kill logging.
 # Format: "port:label"
 # =============================================================================
-#   port  label
-#   5000  registry-center
-#   5001  orchestration backend
-#   3003  orchestration frontend
-#   8080  agents examples server
-#   8902  Assurance Agent (internal, see ADR-006)
+#   port   label
+#   5000   registry-center
+#   5001   orchestration backend
+#   3003   orchestration frontend
+#   8080   agents examples server (management port)
+#   8899   sample agent — RAN Energy Saving Agent
+#   8900   sample agent — Energy Saving Intent Agent
+#   8901   sample agent — Live Streaming Agent
+#   8902   sample agent — Assurance Agent
+#   8903   sample agent — RAN Agent
+#   8904   sample agent — Transport Workbench Agent
+#   8905   sample agent — SPN Fault Handling Agent City1 OMC
+#   8906   sample agent — SPN Fault Handling Agent City2 OMC
+#   8907   sample agent — Uncertainty Simulation Agent
+#   26335  sample agent — SPN Domain Agent
+#   26336  sample agent — Workbench Platform Agent
+#
+# samples.start_agents_server is a single process listening on 12 ports
+# (8080 + 11 agent ports). Killing it on any one port terminates all.
+# See ADR-009 for the full sample agent port architecture.
 OPENAN_PORTS=(
     "5000:registry-center"
     "5001:orchestration backend"
     "3003:orchestration frontend"
-    "8080:agents examples server"
-    "8902:Assurance Agent (internal)"
+    "8080:agents examples server (management port)"
+    "8899:sample agent — RAN Energy Saving Agent"
+    "8900:sample agent — Energy Saving Intent Agent"
+    "8901:sample agent — Live Streaming Agent"
+    "8902:sample agent — Assurance Agent"
+    "8903:sample agent — RAN Agent"
+    "8904:sample agent — Transport Workbench Agent"
+    "8905:sample agent — SPN Fault Handling Agent City1 OMC"
+    "8906:sample agent — SPN Fault Handling Agent City2 OMC"
+    "8907:sample agent — Uncertainty Simulation Agent"
+    "26335:sample agent — SPN Domain Agent"
+    "26336:sample agent — Workbench Platform Agent"
 )
 
 # =============================================================================
@@ -415,7 +439,7 @@ echo " Uninstallation complete!"
 echo "=========================================="
 echo ""
 echo " Removed:"
-echo "   - OpenAN processes (ports 5000, 5001, 3003, 8080, 8902)"
+echo "   - OpenAN processes (ports 5000, 5001, 3003, 8080, 8899-8907, 26335, 26336)"
 echo "   - nginx process (port 443)"
 echo "   - nginx config: ${NGINX_CONF_DEST}"
 echo "   - nginx SSL certs: ${NGINX_SSL_DIR}/cert.pem, key.pem"

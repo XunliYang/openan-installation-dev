@@ -190,58 +190,62 @@ agent card 列表（见 ADR-006）。
 
 ## Assurance Agent
 
-OpenAN 平台内置的电信保障场景 A2A Agent，随 orchestration-center v1.0.0
+OpenAN 平台的电信保障场景 A2A Agent，随 orchestration-center v1.0.0
 源码分发。其 agent card 定义位于 `orchestration-center/samples/agentcard/
 assurance_agent.json`，描述为"负责保障策略及其恢复策略的生成"。具备两个技能：
 `strategy-generation`（将赛事保障需求转换为网络需求）和 `recovery-delivery`
 （恢复保障前网络配置）。provider 为 Huawei，遵循 TM Forum A2A-T 电信扩展协议
-（Task-T、NEGOTIATION-T、DATA-NEGOTIATION-T）。在 `--all` 和 `--orchestrate`
-模式下，由 `orchestrate.start` 启动时自动注册到 registry-center，无需
-`--sample` flag（见 ADR-006）。
+（Task-T、NEGOTIATION-T、DATA-NEGOTIATION-T）。
+
+> **修正 (ADR-009)**：Assurance Agent 由 `samples.start_agents_server` 启动
+> （端口 8902），**仅在 `--sample` 模式下运行**。原 ADR-006 声称由
+> `orchestrate.start` 内部启动，该结论已被证伪。详见 ADR-006 修正记录。
 
 ## 端口 8902 (Port 8902)
 
-Assurance Agent 的 A2A 服务端点端口。由 `python -m orchestrate.start` 启动时
-内部拉起，监听于 `127.0.0.1:8902`，采用 HTTP+JSON 协议绑定。
-**此端口不在 `openan_install.sh` 的 Summary 输出中**——脚本仅显式启动并报告
-5000/5001/3003/443 四个端口（以及可选的 8080）。8902 是 orchestration-center
-组件内部行为，对部署脚本不可见。Nginx 配置中亦无 8902 的代理规则，该端口
-仅本地可访问（见 ADR-006）。
+Assurance Agent 的 A2A 服务端点端口。由 `python -m samples.start_agents_server`
+启动，监听于 `127.0.0.1:8902`，采用 HTTP+JSON 协议绑定。是 11 个示例 agent
+端口之一（见"Sample Agent 端口集群"）。
+
+> **修正 (ADR-009)**：原 ADR-006 声称此端口由 `orchestrate.start` 内部启动，
+> 该结论已被证伪。8902 实际由 `samples.start_agents_server` 启动，受 `--sample`
+> flag 控制。此端口不在 `openan_install.sh` 的 Summary 输出中，Nginx 配置中
+> 亦无代理规则，仅本地可访问。
 
 ## Agent Card 自注册 (Agent Card Self-Registration)
 
-orchestration-center 启动时的内部行为。`python -m orchestrate.start` 在启动
-编排后端（port 5001）的同时，还会：
-1. 启动内嵌的 A2A Agent 端点（port 8902）
-2. 读取种子 agent card JSON 文件（`samples/agentcard/assurance_agent.json`）
-3. 通过 `AGENT_REGISTRY_URL` 向 registry-center POST 注册 agent card
+> **修正 (ADR-009)**：原 ADR-006 声称此行为由 `orchestrate.start` 完成，
+> 该结论已被证伪。Agent Card 注册实际由 `samples.start_agents_server` 完成。
 
-此行为发生在 `openan_install.sh` 的 Step 4 启动 `orchestrate.start` 之后，
-是组件源码层面的行为，部署脚本不感知也不控制。注册后 registry-center 将
-agent card 持久化到 `data/agentcard.json`（file 存储模式）（见 ADR-006）。
+`samples.start_agents_server` 启动时的行为：
+1. 启动 11 个示例 A2A Agent 端点（ports 8899-8907, 26335, 26336）
+2. 读取种子 agent card JSON 文件（`samples/agentcard/*.json`）
+3. 通过 `AGENT_REGISTRY_URL` 向 registry-center POST 注册全部 11 个 agent card
+
+此行为仅在 `--sample` 模式下发生。注册后 registry-center 将 agent card
+持久化到 `data/agentcard.json`（file 存储模式）（见 ADR-006 修正记录、ADR-009）。
 
 ## 种子 Agent Card (Seed Agent Card)
 
 随组件源码分发的静态 agent card JSON 文件，位于 `orchestration-center/samples/
-agentcard/` 目录。与 `--sample` flag 控制的 `samples.start_agents_server`
-（port 8080）不同：seed agent card 是 orchestration-center 核心启动流程的一部分，
-由 `orchestrate.start` 读取并注册，不受 `--sample` 控制。
-`--sample` 启动的是额外的示例服务端点，而 seed card 定义的是 agent 的元数据
-（见 ADR-006）。
+agentcard/` 目录。包含 11 个 agent 的 card 定义（如 `assurance_agent.json`、
+`ran_energy_saving_agent.json` 等）。由 `samples.start_agents_server` 读取
+并向 registry-center 注册，仅在 `--sample` 模式下触发
+（见 ADR-006 修正记录、ADR-009）。
 
-## --sample 与内嵌 Agent 的区别 (--sample vs Built-in Agent)
+## --sample 与示例 Agent 的关系 (--sample and Sample Agents)
 
-`openan_install.sh` 中一个容易混淆的概念区分：
+> **修正 (ADR-009)**：原 ADR-006 声称存在"内嵌 Agent"（不受 `--sample` 控制），
+> 该结论已被证伪。所有 11 个示例 agent（含 Assurance Agent）均由
+> `samples.start_agents_server` 启动，受 `--sample` flag 控制。
 
-| 概念 | 控制方式 | 端口 | 启动模块 | 默认 |
-|------|---------|------|---------|------|
-| agents examples server | `--sample` flag | 8080 | `samples.start_agents_server` | 关闭 |
-| Assurance Agent（内嵌） | 无，始终启动 | 8902 | `orchestrate.start`（内部） | 开启 |
+`--sample` flag 控制 `samples.start_agents_server` 的启动，该进程启动后：
+- 在端口 8080 提供管理端点
+- 在端口 8899-8907、26335、26336 启动 11 个示例 A2A Agent
+- 向 registry-center 注册全部 11 个 agent card
 
-`--sample` 控制的是独立的示例服务端（port 8080），用于提供额外的 demo agent。
-Assurance Agent 是 orchestration-center 核心功能的一部分，无论是否指定
-`--sample`都会启动并注册。因此即使用户运行不带 `--sample` 的
-`./openan_install.sh`，registry-center 中仍会出现 Assurance Agent（见 ADR-006）。
+不带 `--sample` 时，**没有任何示例 agent 启动**，registry-center 中不应出现
+agent card（除非有残留数据文件，见"Agent Card 数据残留"）（见 ADR-009）。
 
 ## Agent Card 数据残留 (Agent Card Data Residue)
 
@@ -254,10 +258,11 @@ registry-center 在 file 存储模式下将 agent card 持久化到 `data/agentc
 ## free_port() 端口覆盖范围 (free_port Coverage)
 
 `openan_install.sh` 中的 `free_port()` 函数（lines 718-735）在启动服务前清理被占用的
-端口，覆盖 6 个端口：5000、5001、3003、443、8080、**8902**。8902 于 ADR-008 中新增，
-因为 `orchestrate.start` 内部启动的 Assurance Agent 绑定 8902，残留进程会导致
-绑定失败并引发 404 错误。`free_port()` 采用无差别 kill（不检查 cmdline），与卸载
-脚本的智能识别不同——安装场景中端口上的进程几乎都是 OpenAN 自己的残留进程。
+端口。自 ADR-009 起覆盖 16 个端口：5000、5001、3003、443、8080、**8899-8907、26335、
+26336**。ADR-008 新增了 8902 的清理（基于错误前提，已被 ADR-009 修正），ADR-009
+将范围扩展到全部 11 个 sample agent 端口。`free_port()` 采用无差别 kill（不检查
+cmdline），与卸载脚本的智能识别不同——安装场景中端口上的进程几乎都是 OpenAN
+自己的残留进程（见 ADR-008、ADR-009）。
 
 ## openan_uninstall.sh
 
@@ -290,11 +295,11 @@ nginx 配置，保留环境工具（Python、Node.js、npm、nginx 二进制）�
 ## 跨端口进程逃逸 (Cross-port Process Escape)
 
 卸载脚本中的一种进程逃逸现象：一个多端口 OpenAN 进程（如 `samples.start_agents_server`，
-同时关联端口 5000 client 连接、8080 listener、8902 listener）在所有端口上的 pattern
+同时关联 12 个端口：8080 管理端口 + 11 个 agent 端口）在所有端口上的 pattern
 匹配均失败，导致进程永远不会被杀死。根因是 ADR-007 的"每端口单一 pattern"设计
-无法处理跨端口进程——port 5000 的 pattern 是 `agent_registry`，port 8902 的 pattern
-是 `orchestrate`，而 `start_agents_server` 的 cmdline 不包含这两个关键词。ADR-008
-通过全局 pattern 匹配修复此问题（见 ADR-008）。
+无法处理跨端口进程。ADR-008 通过全局 pattern 匹配修复了 pattern 失效问题，
+但仅覆盖 8902 一个端口，遗留 9 个端口未扫描。ADR-009 将端口覆盖扩展到全部
+11 个 sample agent 端口，彻底消除逃逸（见 ADR-008、ADR-009）。
 
 ## 全局 Pattern 匹配 (Global Pattern Matching)
 
@@ -315,8 +320,49 @@ pattern 检查和 WARN 日志。ADR-008 将 `find_pids_on_port` 的优先级改�
 
 ## 卸载端口覆盖范围 (Uninstall Port Coverage)
 
-`openan_uninstall.sh` 覆盖 6 个端口：5000、5001、3003、8080、8902、443。比安装脚本的
-`free_port()` 多覆盖 8902（Assurance Agent 内部端口），因为 8902 进程有独立 PID，
-kill 5001 的主进程不一定能终止 8902 子进程。443 由 nginx 停止逻辑单独处理
-（见 ADR-007、ADR-006）。自 ADR-008 起，安装脚本的 `free_port()` 也覆盖 8902，
-形成双重保险。
+`openan_uninstall.sh` 自 ADR-009 起覆盖 15 个端口：5000、5001、3003、8080、
+8899-8907、26335、26336。443 由 nginx 停止逻辑单独处理。
+`samples.start_agents_server` 是单进程多端口（12 个端口），在任意一个端口上发现并
+kill 即可终止全部端口监听。扩展端口范围确保该进程在所有端口上都能被发现
+（见 ADR-007、ADR-008、ADR-009）。
+
+## Sample Agent 端口集群 (Sample Agent Port Cluster)
+
+`python -m samples.start_agents_server` 启动的 11 个示例 A2A Agent 的端口集合。
+由**同一个 Python 进程**监听全部 11 个端口，加上管理端口 8080 共 12 个端口。
+
+| 端口 | Agent 名称 | Seed 文件 |
+|------|-----------|----------|
+| 8899 | RAN Energy Saving Agent | `ran_energy_saving_agent.json` |
+| 8900 | Energy Saving Intent Agent | |
+| 8901 | Live Streaming Agent | |
+| 8902 | Assurance Agent | `assurance_agent.json` |
+| 8903 | RAN Agent | |
+| 8904 | Transport Workbench Agent | |
+| 8905 | SPN Fault Handling Agent City1 OMC | |
+| 8906 | SPN Fault Handling Agent City2 OMC | |
+| 8907 | Uncertainty Simulation Agent | |
+| 26335 | SPN Domain Agent | |
+| 26336 | Workbench Platform Agent | |
+
+端口 26335 和 26336 模拟真实运维平台的端口分配。全部 11 个 agent 的 seed JSON
+文件位于 `orchestration-center/samples/agentcard/` 目录。仅在 `--sample` 模式下
+启动（见 ADR-009）。
+
+## 管理端口 8080 (Management Port 8080)
+
+`samples.start_agents_server` 的管理/入口端口。与 11 个 agent 端口（8899-8907、
+26335、26336）同属一个 Python 进程。`openan_install.sh` 的 Summary 输出中将其
+标注为 "agents examples server"。Nginx 配置中无 8080 的代理规则，仅本地可访问
+（见 ADR-009）。
+
+## 单进程多端口 (Single Process Multi-Port)
+
+`samples.start_agents_server` 的进程模型：一个 Python 进程同时监听 12 个端口
+（8080 + 11 个 agent 端口）。这意味着：
+- kill 主进程 PID 即可终止全部 12 个端口的监听
+- 在任意一个端口上发现进程并 kill，等效于 kill 主进程
+- 卸载脚本扩展端口覆盖范围后，`samples` pattern 在任意一个端口上匹配即可完成清理
+
+与多进程模型（每个 agent 独立进程）不同，单进程模型下不需要逐端口 kill
+（见 ADR-009）。

@@ -2,7 +2,12 @@
 
 ## 状态
 
-已采纳 (Accepted) — 2026-08-12
+已修正 (Superseded by ADR-009) — 2026-08-13
+
+> **修正说明**：本 ADR 的核心结论已被 [ADR-009](./ADR-009-sample-agent-port-cluster.md)
+> 证伪。 Assurance Agent（端口 8902）由 `samples.start_agents_server` 启动
+> （受 `--sample` flag 控制），**并非** `orchestrate.start` 内部启动。
+> 原文保留作为历史记录，请以 ADR-009 为准。
 
 ## 背景
 
@@ -199,3 +204,24 @@ cat orchestration-center/samples/agentcard/assurance_agent.json
   不覆盖 8902，残留的 8902 进程不会被脚本主动 kill
 - registry-center 的 `data/` 目录在重新运行脚本时不被清理，导致 agent card
   数据残留（见上文"数据残留"章节）
+
+---
+
+## 修正记录 (2026-08-13)
+
+本 ADR 的以下结论已被 ADR-009 证伪：
+
+| 原结论 | 修正后 |
+|--------|--------|
+| `orchestrate.start` 内部启动 Assurance Agent（8902） | Assurance Agent 由 `samples.start_agents_server` 启动，受 `--sample` 控制 |
+| Assurance Agent 是 orchestration-center 核心功能 | Assurance Agent 是示例 agent 之一，非核心功能 |
+| `--sample` 仅控制 8080，不控制 Assurance Agent | `--sample` 控制全部 12 个端口（8080 + 11 个 agent 端口） |
+| Agent Card 自注册由 `orchestrate.start` 完成 | Agent Card 注册由 `samples.start_agents_server` 完成 |
+
+### 对观察现象的正确解释
+
+本 ADR 观察到"不带 `--sample` 时 Assurance Agent 仍出现"，实际原因是：
+1. 上一次以 `--sample` 运行后，`samples.start_agents_server` 进程未被完全清理（9 个端口未覆盖）
+2. `registry-center/data/agentcard.json` 中持久化了上一次注册的 agent card 数据
+
+详见 [ADR-009](./ADR-009-sample-agent-port-cluster.md)。

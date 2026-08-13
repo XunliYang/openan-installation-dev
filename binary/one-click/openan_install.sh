@@ -1420,6 +1420,16 @@ FRONTEND_REAL_PID=""
 AGENTS_PID=""
 NGINX_PID=""
 
+# Clean all sample agent ports (defensive — residual samples.start_agents_server
+# processes from a previous --sample run can cause 404 on orchestration API routes).
+# samples.start_agents_server is a single process listening on 12 ports
+# (8080 + 11 agent ports). See ADR-009 for the full port architecture.
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    for sap in 8899 8900 8901 8902 8903 8904 8905 8906 8907 26335 26336; do
+        free_port "${sap}"
+    done
+fi
+
 # Start registry-center (port 5000)
 if [ "${INSTALL_REGISTRY}" = "true" ]; then
 free_port 5000
@@ -1432,12 +1442,8 @@ echo "  PID: ${REGISTRY_PID}"
 fi
 
 # Start orchestration-center backend (port 5001)
-# Also free port 8902 — orchestrate.start internally starts an Assurance Agent
-# on 8902 (see ADR-006). A residual process on 8902 would cause the Assurance
-# Agent to fail binding, resulting in 404 on orchestration API routes (see ADR-008).
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 free_port 5001
-free_port 8902
 echo "[START] orchestration-center backend (http://127.0.0.1:5001)..."
 cd "${ORCHESTRATION_DIR}"
 source venv/bin/activate
