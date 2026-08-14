@@ -20,8 +20,9 @@ set -euo pipefail
 # =============================================================================
 # Constants
 # =============================================================================
-DEFAULT_LLM_MODEL="qwen3.6-flash"
-DEFAULT_LLM_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+# No third-party defaults — users must provide their own model and URL.
+DEFAULT_LLM_MODEL=""
+DEFAULT_LLM_URL=""
 
 # =============================================================================
 # Argument parsing
@@ -45,8 +46,8 @@ Options:
   --reg                Configure registry-center
   --orc                Configure orchestration-center
                        (default: both --reg --orc if neither specified)
-  --model <name>       LLM model name (default: qwen3.6-flash)
-  --url <url>          LLM API URL (default: https://dashscope.aliyuncs.com/compatible-mode/v1)
+  --model <name>       LLM model name
+  --url <url>          LLM API URL
   --api-key <key>      API key (or set LLM_API_KEY env var)
   --validate           Validate API connection before writing (default)
   --no-validate        Skip validation
@@ -60,7 +61,7 @@ Interactive mode:
 
 Examples:
   # Non-interactive (same config for both projects):
-  ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions --api-key your-key
+  ./configure_llm.sh --model <model-name> --url <api-url> --api-key your-key
 
   # Interactive (configure both projects separately):
   ./configure_llm.sh --reg --orc
@@ -69,10 +70,10 @@ Examples:
   ./configure_llm.sh --reg
 
   # Non-interactive (only orchestration):
-  ./configure_llm.sh --orc --model glm-5.1 --url https://... --api-key your-key
+  ./configure_llm.sh --orc --model <model-name> --url <api-url> --api-key your-key
 
   # API key via env var (avoids key in shell history):
-  LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://...
+  LLM_API_KEY=your-key ./configure_llm.sh --model <model-name> --url <api-url>
 USAGE_EOF
 }
 
@@ -386,10 +387,10 @@ if [ "${INTERACTIVE}" = "true" ]; then
         echo "[CONFIG] === Registry Center LLM Configuration ==="
         echo ""
 
-        read -r -p "  Enter LLM model name [${DEFAULT_MODEL}]: " REG_MODEL < /dev/tty || REG_MODEL=""
+        read -r -p "  Enter LLM model name${DEFAULT_MODEL:+ [${DEFAULT_MODEL}]}: " REG_MODEL < /dev/tty || REG_MODEL=""
         REG_MODEL="${REG_MODEL:-${DEFAULT_MODEL}}"
 
-        read -r -p "  Enter LLM API URL [${DEFAULT_URL}]: " REG_URL < /dev/tty || REG_URL=""
+        read -r -p "  Enter LLM API URL${DEFAULT_URL:+ [${DEFAULT_URL}]}: " REG_URL < /dev/tty || REG_URL=""
         REG_URL="${REG_URL:-${DEFAULT_URL}}"
 
         if [ -n "${LLM_API_KEY}" ]; then
@@ -503,10 +504,10 @@ if [ "${INTERACTIVE}" = "true" ]; then
 
             # If not reusing (or registry not configured), read separately
             if [ -z "${ORC_MODEL}" ]; then
-                read -r -p "  Enter LLM model name [${DEFAULT_MODEL}]: " ORC_MODEL < /dev/tty || ORC_MODEL=""
+                read -r -p "  Enter LLM model name${DEFAULT_MODEL:+ [${DEFAULT_MODEL}]}: " ORC_MODEL < /dev/tty || ORC_MODEL=""
                 ORC_MODEL="${ORC_MODEL:-${DEFAULT_MODEL}}"
 
-                read -r -p "  Enter LLM API URL [${DEFAULT_URL}]: " ORC_URL < /dev/tty || ORC_URL=""
+                read -r -p "  Enter LLM API URL${DEFAULT_URL:+ [${DEFAULT_URL}]}: " ORC_URL < /dev/tty || ORC_URL=""
                 ORC_URL="${ORC_URL:-${DEFAULT_URL}}"
 
                 if [ -n "${LLM_API_KEY}" ]; then
