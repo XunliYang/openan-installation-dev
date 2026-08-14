@@ -13,6 +13,7 @@ openan-installation/
 └── containerized/                   # Containerized deployment
     ├── build/                       # Image build scripts
     ├── install.sh                   # Interactive installation tool
+    ├── uninstall.sh                 # One-click uninstall script
     ├── openan-chart/                # Helm chart
     └── QUICKSTART.md                # Quick start guide
 ```
@@ -32,7 +33,9 @@ cd openan-installation/containerized
 **Features:**
 - Modular component selection (Registry Center, Orchestration Center, Workflow Designer)
 - Fully configurable parameters (LLM API keys, image registry, storage)
-- Auto-detects cluster environment (StorageClass, Ingress Controller)
+- Auto-detects cluster environment (StorageClass, Ingress Controller, LoadBalancer)
+- MetalLB auto-installation for bare-metal clusters
+- One-click uninstall with optional data cleanup
 
 **Manual / System Admin Installation:**
 If you prefer to manually install the Helm chart, follow these steps:

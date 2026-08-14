@@ -119,6 +119,8 @@ curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards
 curl http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards
 ```
 
+> **Note:** If no agent-cards are registered in the Registry Center, the API may return an error or empty response. This is expected behavior for a fresh installation. You can register agents through the Workflow Designer UI or via the Registry API.
+
 ### Access via NodePort (Fallback)
 
 If LoadBalancer is not available (MetalLB installation failed or not supported), you can access the frontend via NodePort:
@@ -165,17 +167,50 @@ helm upgrade openan ./openan-chart \
 
 ## Cleanup
 
-To uninstall the platform:
+### One-click Uninstall (Recommended)
+
+Use the automated uninstall script:
+
+```bash
+cd containerized
+./uninstall.sh
+```
+
+The script will:
+- Detect all OpenAN resources (Helm release, PVCs, PVs, MetalLB config)
+- Ask whether to remove persistent data (PVCs, PV, StorageClass)
+- Ask whether to delete the namespace
+- Automatically clean up MetalLB configuration (if exists)
+
+**Options:**
+- **Preserve data**: Keep PVCs/PV for reinstallation or backup
+- **Remove data**: Delete all persistent storage (database data will be lost)
+
+### Manual Uninstall
+
+If you prefer to uninstall manually:
 
 ```bash
 # Uninstall Helm release
 helm uninstall openan -n openan
 
-# Delete PVC (optional, clears database data)
+# Remove MetalLB configuration (if installed by OpenAN)
+kubectl delete ipaddresspool openan-pool -n metallb-system
+kubectl delete l2advertisement openan-l2 -n metallb-system
+
+# Delete PVCs (optional, clears database data)
 kubectl delete pvc -n openan --all
 
-# Delete namespace (removes all resources)
+# Delete PV (if created)
+kubectl delete pv openan-postgres-pv
+
+# Delete namespace (removes all remaining resources)
 kubectl delete namespace openan
+```
+
+**Note:** If using hostPath storage, manually clean up data on nodes:
+```bash
+rm -rf /data/openan-postgres
 ```
 
 ## Troubleshooting
