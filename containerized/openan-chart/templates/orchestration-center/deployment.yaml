@@ -65,19 +65,6 @@ spec:
               name: {{ .Values.orchestration.llm.chat.existingSecret }}
               key: {{ .Values.orchestration.llm.chat.existingSecretKey }}
         {{- end }}
-        {{- if .Values.orchestration.a2at.apiKey }}
-        - name: A2AT_LLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: orchestration-center-secret
-              key: a2at-llm-api-key
-        {{- else if .Values.orchestration.a2at.existingSecret }}
-        - name: A2AT_LLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.orchestration.a2at.existingSecret }}
-              key: {{ .Values.orchestration.a2at.existingSecretKey }}
-        {{- end }}
         startupProbe:
           {{- toYaml .Values.orchestration.startupProbe | nindent 10 }}
         livenessProbe:

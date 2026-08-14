@@ -47,9 +47,6 @@ The script will guide you through an interactive setup:
    - Chat Model (default: `qwen3.7-plus`)
    - Chat API URL (default: `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`)
    - Chat API Key (required)
-   - A2AT Model (default: `qwen3.7-plus`)
-   - A2AT API URL (default: `https://dashscope.aliyuncs.com/compatible-mode/v1`)
-   - A2AT API Key (required)
 
 5. **[5/5] Agent Examples Configuration** - Start demo agents server:
    - Start agent examples server (default: Yes)
@@ -190,11 +187,11 @@ To uninstall the platform:
 # Uninstall Helm release
 helm uninstall openan -n openan
 
-# Delete namespace (removes all resources)
-kubectl delete namespace openan
-
 # Delete PVC (optional, clears database data)
 kubectl delete pvc -n openan --all
+
+# Delete namespace (removes all resources)
+kubectl delete namespace openan
 ```
 
 ## Troubleshooting

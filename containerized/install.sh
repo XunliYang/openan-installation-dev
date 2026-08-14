@@ -42,10 +42,6 @@ CONFIG_REGISTRY_CHAT_APIKEY=""
 CONFIG_ORCH_CHAT_MODEL="qwen3.7-plus"
 CONFIG_ORCH_CHAT_URL="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 CONFIG_ORCH_CHAT_APIKEY=""
-CONFIG_ORCH_A2AT_PROVIDER="openai"
-CONFIG_ORCH_A2AT_MODEL="qwen3.7-plus"
-CONFIG_ORCH_A2AT_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-CONFIG_ORCH_A2AT_APIKEY=""
 
 CONFIG_DB_PASSWORD="openan-db-password"
 CONFIG_INGRESS_HOST="openan.local"
@@ -441,12 +437,6 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
     CONFIG_ORCH_CHAT_MODEL=$(ask_input "  Model name" "$CONFIG_ORCH_CHAT_MODEL")
     CONFIG_ORCH_CHAT_URL=$(ask_input "  API URL" "$CONFIG_ORCH_CHAT_URL")
     CONFIG_ORCH_CHAT_APIKEY=$(ask_input "  API Key" "$CONFIG_ORCH_CHAT_APIKEY")
-    
-    echo ""
-    log_info "A2AT Model:"
-    CONFIG_ORCH_A2AT_MODEL=$(ask_input "  Model name" "$CONFIG_ORCH_A2AT_MODEL")
-    CONFIG_ORCH_A2AT_URL=$(ask_input "  API URL" "$CONFIG_ORCH_A2AT_URL")
-    CONFIG_ORCH_A2AT_APIKEY=$(ask_input "  API Key" "$CONFIG_ORCH_A2AT_APIKEY")
 fi
 
 # Step 5: Agent Examples Server
@@ -490,7 +480,6 @@ fi
 if [ "$CONFIG_ORCHESTRATION" = true ]; then
     echo "    Orchestration Center:"
     echo "      Chat:   $CONFIG_ORCH_CHAT_MODEL"
-    echo "      A2AT:   $CONFIG_ORCH_A2AT_MODEL"
 fi
 
 if [ "$CONFIG_ORCHESTRATION" = true ]; then
@@ -560,20 +549,6 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
         fi
         if [ -n "$CONFIG_ORCH_CHAT_APIKEY" ]; then
             HELM_ARGS="$HELM_ARGS --set orchestration.llm.chat.apiKey=$CONFIG_ORCH_CHAT_APIKEY"
-        fi
-    fi
-    
-    # Orchestration A2AT
-    if [ -n "$CONFIG_ORCH_A2AT_PROVIDER" ]; then
-        HELM_ARGS="$HELM_ARGS --set orchestration.a2at.provider=$CONFIG_ORCH_A2AT_PROVIDER"
-    fi
-    if [ -n "$CONFIG_ORCH_A2AT_MODEL" ]; then
-        HELM_ARGS="$HELM_ARGS --set orchestration.a2at.model=$CONFIG_ORCH_A2AT_MODEL"
-        if [ -n "$CONFIG_ORCH_A2AT_URL" ]; then
-            HELM_ARGS="$HELM_ARGS --set orchestration.a2at.baseUrl=$CONFIG_ORCH_A2AT_URL"
-        fi
-        if [ -n "$CONFIG_ORCH_A2AT_APIKEY" ]; then
-            HELM_ARGS="$HELM_ARGS --set orchestration.a2at.apiKey=$CONFIG_ORCH_A2AT_APIKEY"
         fi
     fi
 fi

@@ -144,14 +144,6 @@ orchestration:
       apiKey: "sk-your-actual-api-key"
       existingSecret: ""
       existingSecretKey: "orchestration-llm-chat-api-key"
-  # A2AT SDK configuration -- currently is same as llm.chat
-  a2at:
-    provider: "openai"
-    model: "qwen3.7-plus"
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    apiKey: "sk-your-actual-api-key"
-    existingSecret: ""
-    existingSecretKey: "orchestration-a2at-llm-api-key"
   # Resource limits
   resources:
     requests:

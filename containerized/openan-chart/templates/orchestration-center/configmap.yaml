@@ -32,9 +32,4 @@ data:
   # LLM Chat
   LLM_CHAT_MODEL: {{ .Values.orchestration.llm.chat.model | quote }}
   LLM_CHAT_URL: {{ .Values.orchestration.llm.chat.url | quote }}
-
-  # A2AT SDK
-  A2AT_LLM_PROVIDER: {{ .Values.orchestration.a2at.provider | quote }}
-  A2AT_LLM_MODEL: {{ .Values.orchestration.a2at.model | quote }}
-  A2AT_LLM_BASE_URL: {{ .Values.orchestration.a2at.baseUrl | quote }}
 {{- end }}
