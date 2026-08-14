@@ -776,7 +776,7 @@ fi
 
 HELM_ARGS="$HELM_ARGS --set postgresql.password=$CONFIG_DB_PASSWORD"
 if [ -n "$INGRESS_IP" ]; then
-    HELM_ARGS="$HELM_ARGS --set ingress.host=$INGRESS_IP"
+    log_info "Using LoadBalancer IP: $INGRESS_IP (Ingress will use path-based routing without host)"
 else
     HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
 fi

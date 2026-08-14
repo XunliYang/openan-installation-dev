@@ -274,7 +274,9 @@ frontend:
 ingress:
   enabled: true
   className: nginx
-  host: openan.local
+  # host: Set to a DNS name for host-based routing, or leave empty for IP-based path routing
+  # Examples: "openan.local" for DNS, "" for direct IP access (e.g., http://<LB_IP>/)
+  host: ""
   # TLS configuration
   tls:
     enabled: false
