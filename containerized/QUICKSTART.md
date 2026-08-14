@@ -62,6 +62,7 @@ The script will guide you through an interactive setup:
 ## Step 2: Verify Deployment
 
 After setup completes, verify the deployment:
+> note: It may take a few minutes for all Pods to reach `Running` state. Please access the platform only after all Pods are running.
 
 ```bash
 # Check Pod status (wait for all Pods to be Running)
