@@ -66,21 +66,21 @@ registry:
   # LLM configuration for registry-center
   llm:
     chat:
-      model: "glm-5.1"
-      url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-      apiKey: "sk-your-actual-api-key"
+      model: "your-chat-model"
+      url: "https://your-llm-provider.com/v1/chat/completions"
+      apiKey: "your-api-key"
       existingSecret: ""
       existingSecretKey: "registry-llm-chat-api-key"
     embed:
-      model: "bge-m3"
-      url: ""
-      apiKey: ""
+      model: "your-embed-model"
+      url: "https://your-llm-provider.com/v1/embeddings"
+      apiKey: "your-api-key"
       existingSecret: ""
       existingSecretKey: "registry-llm-embed-api-key"
     rerank:
-      model: "bge-reranker-v2-m3"
-      url: ""
-      apiKey: ""
+      model: "your-rerank-model"
+      url: "https://your-llm-provider.com/v1/rerank"
+      apiKey: "your-api-key"
       existingSecret: ""
       existingSecretKey: "registry-llm-rerank-api-key"
   # VectorDB (optional, Milvus)
@@ -139,9 +139,9 @@ orchestration:
   # LLM configuration for orchestration-center
   llm:
     chat:
-      model: "qwen3.7-plus"
-      url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-      apiKey: "sk-your-actual-api-key"
+      model: "your-chat-model"
+      url: "https://your-llm-provider.com/v1/chat/completions"
+      apiKey: "your-api-key"
       existingSecret: ""
       existingSecretKey: "orchestration-llm-chat-api-key"
   # Resource limits

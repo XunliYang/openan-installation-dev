@@ -40,13 +40,13 @@ The script will guide you through an interactive setup:
    - Custom selection
 
 3. **[3/5] Registry Center LLM Configuration** - Configure LLM for Registry Center:
-   - Chat Model (default: `glm-5.1`)
-   - API URL (default: `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`)
+   - Chat Model (required, e.g., `gpt-4`, `claude-3-opus`, `qwen-max`)
+   - API URL (required, e.g., `https://api.openai.com/v1/chat/completions`)
    - API Key (required)
 
 4. **[4/5] Orchestration Center LLM Configuration** - Configure LLM for Orchestration Center:
-   - Chat Model (default: `qwen3.7-plus`)
-   - Chat API URL (default: `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`)
+   - Chat Model (required, e.g., `gpt-4`, `claude-3-opus`, `qwen-max`)
+   - Chat API URL (required, e.g., `https://api.openai.com/v1/chat/completions`)
    - Chat API Key (required)
 
 5. **[5/5] Agent Examples Configuration** - Start demo agents server:
