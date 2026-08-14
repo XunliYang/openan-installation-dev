@@ -150,7 +150,8 @@ Linux 命令，输出所有非回环网卡的 IP 地址（空格分隔）。与 
 接收参数（`--reg`、`--orc`、`--model`、`--url`、`--api-key`、`--validate`/`--no-validate`），
 支持交互式和非交互式两种模式。当 `--model`/`--url`/`--api-key` 任意一个缺失时自动进入
 交互模式；`--reg --orc` 同时指定时支持分开询问 registry 和 orchestration 的 LLM 配置
-并提供复用选项。`openan_install.sh` Step 3.5 直接委托调用此脚本（见 ADR-005、ADR-010）。
+并提供复用选项。脚本在询问用户或验证 LLM 之前，先预检每个目标项目的 `llm_config.json`
+是否存在，文件缺失的项目直接跳过，避免浪费用户输入和网络验证（见 ADR-005、ADR-010、ADR-012）。
 
 ## Flag 传入 (Flag-based Input)
 
@@ -171,8 +172,17 @@ Linux 命令，输出所有非回环网卡的 IP 地址（空格分隔）。与 
 `configure_llm.sh` 和 `openan_install.sh` 共同使用的目标项目选择参数（ADR-010）。`--reg`
 配置 registry-center，`--orc` 配置 orchestration-center，同时指定时配置两者，两者均未
 指定时默认配置两者。两个脚本的 flag 语义完全一致，`openan_install.sh` 直接将安装 flag
-传递给 `configure_llm.sh`。缺失项目目录时打印 `[WARN]` 并跳过
-（见 ADR-005、ADR-010）。
+传递给 `configure_llm.sh`。缺失项目配置文件时在 Step 0 预检阶段打印 `[WARN]` 并跳过
+（见 ADR-005、ADR-010、ADR-012）。
+
+## 配置文件预检 (Config File Pre-check)
+
+`configure_llm.sh` 的 Step 0 预检机制（ADR-012）。在参数解析和 `SCRIPT_DIR` 解析之后、
+Python 解析和任何用户交互之前，对每个 `DO_REGISTRY`/`DO_ORCHESTRATION` 为 true 的项目
+检查 `llm_config.json` 是否存在。文件不存在的项目打印 `[WARN]` 并设置 `DO_* = false`
+（跳过该项目的交互询问和验证）。两个项目都被跳过时立即打印 `[ERROR]` 并 `exit 1`。
+预检同时覆盖交互模式（避免浪费用户输入）和非交互模式（避免浪费网络验证请求）。
+`write_config()` 函数内部的文件存在性检查保留作为 defense-in-depth。
 
 ## 交互模式自动触发 (Interactive Mode Auto-trigger)
 

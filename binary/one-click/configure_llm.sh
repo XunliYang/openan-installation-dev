@@ -156,6 +156,35 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # =============================================================================
+# Step 0: Pre-check target config files
+# For each requested project, verify llm_config.json exists before asking
+# the user for input or validating. Projects whose files are missing (not
+# installed) are skipped. If neither file exists, exit early.
+# =============================================================================
+REG_CONFIG="${SCRIPT_DIR}/registry-center/common/config/llm_config.json"
+ORC_CONFIG="${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json"
+
+if [ "${DO_REGISTRY}" = "true" ] && [ ! -f "${REG_CONFIG}" ]; then
+    echo "[WARN] ${REG_CONFIG} not found, skipping."
+    echo "       (Is the corresponding project installed?)"
+    DO_REGISTRY=false
+fi
+
+if [ "${DO_ORCHESTRATION}" = "true" ] && [ ! -f "${ORC_CONFIG}" ]; then
+    echo "[WARN] ${ORC_CONFIG} not found, skipping."
+    echo "       (Is the corresponding project installed?)"
+    DO_ORCHESTRATION=false
+fi
+
+if [ "${DO_REGISTRY}" = "false" ] && [ "${DO_ORCHESTRATION}" = "false" ]; then
+    echo ""
+    echo "[ERROR] No target llm_config.json files found."
+    echo "        Neither registry-center nor orchestration-center appears to be installed."
+    echo "        Please install the projects first, then run configure_llm.sh again."
+    exit 1
+fi
+
+# =============================================================================
 # Function: read_masked — read user input with asterisk masking.
 # Usage: read_masked "Prompt: " VAR_NAME
 # Reads from /dev/tty, echoes '*' for each character typed.
@@ -273,6 +302,8 @@ write_config() {
     local url="$3"
     local api_key="$4"
 
+    # Defense-in-depth: Step 0 pre-check should have already caught missing
+    # files, but keep this check in case write_config is called directly.
     if [ ! -f "${config_path}" ]; then
         echo "[WARN] ${config_path} not found, skipping."
         echo "       (Is the corresponding project installed?)"
@@ -571,7 +602,7 @@ if [ "${INTERACTIVE}" = "true" ]; then
 
     # --- Write phase ---
     if [ "${DO_REGISTRY}" = "true" ] && [ -n "${REG_API_KEY}" ]; then
-        if write_config "${SCRIPT_DIR}/registry-center/common/config/llm_config.json" \
+        if write_config "${REG_CONFIG}" \
             "${REG_MODEL}" "${REG_URL}" "${REG_API_KEY}"; then
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
         else
@@ -583,7 +614,7 @@ if [ "${INTERACTIVE}" = "true" ]; then
     fi
 
     if [ "${DO_ORCHESTRATION}" = "true" ] && [ -n "${ORC_API_KEY}" ]; then
-        if write_config "${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json" \
+        if write_config "${ORC_CONFIG}" \
             "${ORC_MODEL}" "${ORC_URL}" "${ORC_API_KEY}"; then
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
         else
@@ -642,10 +673,10 @@ else
     # Build target file list
     LLM_CONFIGS=()
     if [ "${DO_REGISTRY}" = "true" ]; then
-        LLM_CONFIGS+=("${SCRIPT_DIR}/registry-center/common/config/llm_config.json")
+        LLM_CONFIGS+=("${REG_CONFIG}")
     fi
     if [ "${DO_ORCHESTRATION}" = "true" ]; then
-        LLM_CONFIGS+=("${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json")
+        LLM_CONFIGS+=("${ORC_CONFIG}")
     fi
 
     # Write configs (same values for all targets)

@@ -258,7 +258,7 @@ LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmo
 ./configure_llm.sh --help
 ```
 
-> **`--reg`/`--orc` 参数与安装模式的对应关系**：安装脚本和 `configure_llm.sh` 使用相同的 flag。如果指定的项目未安装，脚本会跳过并打印警告。
+> **`--reg`/`--orc` 参数与安装模式的对应关系**：安装脚本和 `configure_llm.sh` 使用相同的 flag。如果指定的项目未安装（`llm_config.json` 不存在），脚本会在询问配置前检测并跳过，打印警告。两个项目都未安装时脚本直接报错退出。
 >
 > 如果跳过了交互式配置，LLM 相关功能将使用默认值，可能无法正常工作。请在启动服务前运行 `configure_llm.sh` 完成配置。
 
@@ -739,7 +739,7 @@ LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmo
 ./configure_llm.sh --help
 ```
 
-> **`--reg`/`--orc` flags**: The install script and `configure_llm.sh` use the same flags. If the specified project is not installed, the script skips it with a warning.
+> **`--reg`/`--orc` flags**: The install script and `configure_llm.sh` use the same flags. If the specified project is not installed (`llm_config.json` missing), the script detects this before asking for config and skips it with a warning. If neither project is installed, the script exits with an error.
 >
 > If you skipped interactive configuration, LLM-related features will use defaults and may not work correctly. Please run `configure_llm.sh` to configure before starting services.
 
