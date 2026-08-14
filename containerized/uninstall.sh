@@ -71,8 +71,13 @@ check_prerequisites() {
 }
 
 # ===== Detection Functions =====
+DETECTED_HOSTPATH=""
+DETECTED_HOSTPATH_NODE=""
+
 detect_installation() {
     DETECTED_RESOURCES=()
+    DETECTED_HOSTPATH=""
+    DETECTED_HOSTPATH_NODE=""
     
     # Check Helm release
     if helm status "$CONFIG_RELEASE_NAME" -n "$CONFIG_NAMESPACE" &>/dev/null; then
@@ -100,6 +105,23 @@ detect_installation() {
     if kubectl get pv openan-postgres-pv &>/dev/null; then
         DETECTED_RESOURCES+=("pv")
         log_info "Found PV: openan-postgres-pv"
+        
+        # Check if PV uses hostPath
+        local pv_hostpath
+        pv_hostpath=$(kubectl get pv openan-postgres-pv -o jsonpath='{.spec.hostPath.path}' 2>/dev/null)
+        if [ -n "$pv_hostpath" ]; then
+            DETECTED_RESOURCES+=("hostpath")
+            DETECTED_HOSTPATH="$pv_hostpath"
+            log_info "Found hostPath storage: $pv_hostpath"
+            
+            # Detect target node from nodeAffinity
+            local node
+            node=$(kubectl get pv openan-postgres-pv -o jsonpath='{.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]}' 2>/dev/null)
+            if [ -n "$node" ]; then
+                DETECTED_HOSTPATH_NODE="$node"
+                log_info "hostPath pinned to node: $node"
+            fi
+        fi
     fi
     
     # Check StorageClass created by OpenAN
@@ -165,6 +187,25 @@ remove_metallb_resources() {
 remove_data() {
     log_step "Removing persistent data..."
     
+    # Use pre-detected hostPath info
+    local hostpath_enabled=false
+    local hostpath_dir=""
+    local target_node=""
+    
+    if [[ " ${DETECTED_RESOURCES[*]} " =~ " hostpath " ]]; then
+        hostpath_enabled=true
+        hostpath_dir="$DETECTED_HOSTPATH"
+        target_node="$DETECTED_HOSTPATH_NODE"
+    fi
+    
+    # If node not detected from PV, try to get from postgres pod
+    if [ "$hostpath_enabled" = true ] && [ -z "$target_node" ]; then
+        target_node=$(kubectl get pod openan-postgres-0 -n "$CONFIG_NAMESPACE" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+        if [ -n "$target_node" ]; then
+            DETECTED_HOSTPATH_NODE="$target_node"
+        fi
+    fi
+    
     # Remove PVCs
     local pvcs
     pvcs=$(kubectl get pvc -n "$CONFIG_NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
@@ -187,9 +228,79 @@ remove_data() {
         log_info "Deleted StorageClass: openan-local"
     fi
     
-    # Warn about hostPath data
-    log_warn "If using hostPath storage, manually clean up data on nodes:"
-    log_warn "  rm -rf /data/openan-postgres"
+    # Handle hostPath data cleanup
+    if [ "$hostpath_enabled" = true ] && [ -n "$target_node" ]; then
+        log_info "Detected hostPath storage on node: $target_node"
+        log_info "Path: $hostpath_dir"
+        
+        # Try to auto-clean using a privileged Job
+        log_info "Attempting to auto-clean hostPath data..."
+        
+        local job_name="openan-cleanup-$(date +%s)"
+        
+        kubectl apply -f - <<EOF >/dev/null 2>&1
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $job_name
+  namespace: $CONFIG_NAMESPACE
+spec:
+  template:
+    spec:
+      nodeName: $target_node
+      hostPID: true
+      containers:
+      - name: cleanup
+        image: busybox:latest
+        command: ['sh', '-c', 'rm -rf /hostpath${hostpath_dir}']
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host-root
+          mountPath: /hostpath
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
+          type: Directory
+      restartPolicy: Never
+  backoffLimit: 1
+EOF
+        
+        if [ $? -eq 0 ]; then
+            # Wait for job to complete (max 30s)
+            local wait_count=0
+            while [ $wait_count -lt 6 ]; do
+                local job_status
+                job_status=$(kubectl get job "$job_name" -n "$CONFIG_NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null)
+                if [ "$job_status" = "1" ]; then
+                    log_info "Successfully cleaned hostPath data on node: $target_node"
+                    kubectl delete job "$job_name" -n "$CONFIG_NAMESPACE" --ignore-not-found
+                    break
+                fi
+                sleep 5
+                wait_count=$((wait_count + 1))
+            done
+            
+            # Check if job failed or timed out
+            if [ "$wait_count" -ge 6 ]; then
+                log_warn "Auto-cleanup timed out or failed"
+                log_warn "Manual cleanup required on node '$target_node':"
+                log_warn "  ssh $target_node"
+                log_warn "  sudo rm -rf $hostpath_dir"
+                kubectl delete job "$job_name" -n "$CONFIG_NAMESPACE" --ignore-not-found
+            fi
+        else
+            log_warn "Failed to create cleanup job"
+            log_warn "Manual cleanup required on node '$target_node':"
+            log_warn "  ssh $target_node"
+            log_warn "  sudo rm -rf $hostpath_dir"
+        fi
+    elif [ "$hostpath_enabled" = true ]; then
+        log_warn "hostPath storage detected but could not determine target node"
+        log_warn "Manual cleanup may be required on cluster nodes:"
+        log_warn "  sudo rm -rf $hostpath_dir"
+    fi
     
     return 0
 }
@@ -236,9 +347,18 @@ echo ""
 # Ask about data removal
 if [[ " ${DETECTED_RESOURCES[*]} " =~ " pvcs " ]] || [[ " ${DETECTED_RESOURCES[*]} " =~ " pv " ]]; then
     echo "Data cleanup:"
-    if ask_yes_no "Remove persistent data (PVCs, PVs, StorageClass)?" "no"; then
+    if [[ " ${DETECTED_RESOURCES[*]} " =~ " hostpath " ]]; then
+        echo "  Detected hostPath storage: $DETECTED_HOSTPATH"
+        if [ -n "$DETECTED_HOSTPATH_NODE" ]; then
+            echo "  Located on node: $DETECTED_HOSTPATH_NODE"
+        fi
+    fi
+    if ask_yes_no "Remove persistent data (PVCs, PVs, StorageClass, hostPath)?" "no"; then
         CONFIG_REMOVE_DATA=true
         echo "  - Will remove: PVCs, PV, StorageClass"
+        if [[ " ${DETECTED_RESOURCES[*]} " =~ " hostpath " ]]; then
+            echo "  - Will attempt to clean hostPath data"
+        fi
     else
         echo "  - Will preserve: PVCs, PV, StorageClass"
     fi

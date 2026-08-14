@@ -178,9 +178,11 @@ cd containerized
 
 The script will:
 - Detect all OpenAN resources (Helm release, PVCs, PVs, MetalLB config)
-- Ask whether to remove persistent data (PVCs, PV, StorageClass)
+- Detect hostPath storage location and target node
+- Ask whether to remove persistent data (PVCs, PV, StorageClass, hostPath)
 - Ask whether to delete the namespace
 - Automatically clean up MetalLB configuration (if exists)
+- Auto-clean hostPath data using a privileged Job (falls back to manual instructions)
 
 **Options:**
 - **Preserve data**: Keep PVCs/PV for reinstallation or backup
@@ -208,9 +210,17 @@ kubectl delete pv openan-postgres-pv
 kubectl delete namespace openan
 ```
 
-**Note:** If using hostPath storage, manually clean up data on nodes:
+**hostPath Storage Cleanup:**
+
+If using hostPath storage, you need to manually clean up data on the node:
+
 ```bash
-rm -rf /data/openan-postgres
+# Find the node where postgres was running
+kubectl get pod openan-postgres-0 -n openan -o jsonpath='{.spec.nodeName}'
+
+# SSH to that node and remove the data
+ssh <node-name>
+sudo rm -rf /data/openan-postgres
 ```
 
 ## Troubleshooting
