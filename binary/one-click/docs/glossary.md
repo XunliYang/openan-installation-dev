@@ -152,6 +152,7 @@ Linux 命令，输出所有非回环网卡的 IP 地址（空格分隔）。与 
 交互模式；`--reg --orc` 同时指定时支持分开询问 registry 和 orchestration 的 LLM 配置
 并提供复用选项。脚本在询问用户或验证 LLM 之前，先预检每个目标项目的 `llm_config.json`
 是否存在，文件缺失的项目直接跳过，避免浪费用户输入和网络验证（见 ADR-005、ADR-010、ADR-012）。
+交互模式下用户未提供任何配置（全空输入）时视为跳过，`exit 0` 而非 `exit 1`（见 ADR-013）。
 
 ## Flag 传入 (Flag-based Input)
 
@@ -447,3 +448,13 @@ wheel（平台标签 `any`）只下载一份，两种架构共用。打包机自
 自然匹配，不存在跨架构或版本不兼容问题。registry-center 原本即采用此策略，
 orchestration-center 自 ADR-011 起也从 pre-built venv 改为纯 wheel 策略
 （见 ADR-011）。
+
+## 空配置跳过 (Empty Config Skip)
+
+`configure_llm.sh` 交互模式下的行为分类机制（ADR-013）。当用户在交互模式中
+未提供任何配置（model、url、api_key 全部为空），导致 `SUCCESS_COUNT == 0` 且
+`FAIL_COUNT == 0` 时，脚本将此场景归类为"跳过"而非"错误"：打印 `[SKIP]` 消息
+并 `exit 0`，使调用方（`openan_install.sh`）的安装流程不被中断。与"写入失败"
+（`FAIL_COUNT > 0`，仍 `exit 1`）区分。Summary 标题在此场景下从
+`LLM configuration complete` 改为 `LLM configuration skipped`。非交互模式不受影响
+（缺少参数时自动进入交互模式）。

@@ -691,10 +691,18 @@ fi
 
 # =============================================================================
 # Summary
+# Determine header: "skipped" when no files were written and no failures
+# occurred (user provided no config in interactive mode, see ADR-013).
 # =============================================================================
+if [ "${SUCCESS_COUNT}" -eq 0 ] && [ "${FAIL_COUNT}" -eq 0 ]; then
+    SUMMARY_HEADER="LLM configuration skipped"
+else
+    SUMMARY_HEADER="LLM configuration complete"
+fi
+
 echo ""
 echo "=========================================="
-echo " LLM configuration complete"
+echo " ${SUMMARY_HEADER}"
 echo "=========================================="
 echo "  Updated: ${SUCCESS_COUNT} file(s)"
 if [ "${FAIL_COUNT}" -gt 0 ]; then
@@ -721,6 +729,12 @@ echo "=========================================="
 
 if [ "${SUCCESS_COUNT}" -eq 0 ]; then
     echo ""
-    echo "[ERROR] No files were updated. Please check the warnings above."
-    exit 1
+    if [ "${FAIL_COUNT}" -gt 0 ]; then
+        echo "[ERROR] No files were updated. Please check the warnings above."
+        exit 1
+    else
+        echo "[SKIP] LLM configuration skipped. No files were updated."
+        echo "       Run configure_llm.sh later to configure."
+        exit 0
+    fi
 fi
