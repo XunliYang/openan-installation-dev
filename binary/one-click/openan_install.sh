@@ -7,9 +7,13 @@
 set -euo pipefail
 
 # =============================================================================
-# Argument parsing: --all | --register | --orchestrate | --sample | --help
+# Argument parsing: --reg | --orc | --sample | --help
+# --reg and --orc are boolean flags; if neither is specified, both are enabled.
+# This is consistent with configure_llm.sh's flag design.
 # =============================================================================
-INSTALL_MODE="all"
+# Track whether --reg/--orc was explicitly specified
+REG_FLAG_SET=false
+ORC_FLAG_SET=false
 INSTALL_REGISTRY=true
 INSTALL_ORCHESTRATION=true
 USER_REGISTRY_URL=""
@@ -20,41 +24,35 @@ print_usage() {
 Usage: openan_install.sh [OPTIONS]
 
 Options:
-  --all          Install both registry-center and orchestration-center (default)
-  --register     Install only registry-center
-  --orchestrate  Install only orchestration-center (prompts for registry URL)
+  --reg          Install registry-center
+  --orc          Install orchestration-center
+                 (default: both --reg --orc if neither specified)
   --sample       Start agents examples server (port 8080, off by default)
   -h, --help     Show this help message and exit
 
 Examples:
-  ./openan_install.sh                 # Install everything (same as --all)
-  ./openan_install.sh --register      # Install only registry-center
-  ./openan_install.sh --orchestrate   # Install only orchestration-center
-  ./openan_install.sh --all --sample      # Install everything and start sample agents
+  ./openan_install.sh                 # Install everything (default: --reg --orc)
+  ./openan_install.sh --reg           # Install only registry-center
+  ./openan_install.sh --orc           # Install only orchestration-center
+  ./openan_install.sh --reg --orc --sample  # Install everything and start sample agents
 USAGE_EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --all)
-            INSTALL_MODE="all"
+        --reg)
+            REG_FLAG_SET=true
+            INSTALL_REGISTRY=true
+            INSTALL_ORCHESTRATION=false
             shift
             ;;
-        --register)
-            if [ "${INSTALL_MODE}" = "orchestrate" ]; then
-                echo "[INFO] Both --register and --orchestrate specified; treating as --all."
-                INSTALL_MODE="all"
+        --orc)
+            ORC_FLAG_SET=true
+            if [ "${REG_FLAG_SET}" = "true" ]; then
+                INSTALL_ORCHESTRATION=true
             else
-                INSTALL_MODE="register"
-            fi
-            shift
-            ;;
-        --orchestrate)
-            if [ "${INSTALL_MODE}" = "register" ]; then
-                echo "[INFO] Both --register and --orchestrate specified; treating as --all."
-                INSTALL_MODE="all"
-            else
-                INSTALL_MODE="orchestrate"
+                INSTALL_REGISTRY=false
+                INSTALL_ORCHESTRATION=true
             fi
             shift
             ;;
@@ -66,6 +64,21 @@ while [ $# -gt 0 ]; do
             print_usage
             exit 0
             ;;
+        --all)
+            echo "[ERROR] --all has been removed. Use --reg --orc (or no flags) instead."
+            echo "        See: ./openan_install.sh --help"
+            exit 1
+            ;;
+        --register)
+            echo "[ERROR] --register has been removed. Use --reg instead."
+            echo "        See: ./openan_install.sh --help"
+            exit 1
+            ;;
+        --orchestrate)
+            echo "[ERROR] --orchestrate has been removed. Use --orc instead."
+            echo "        See: ./openan_install.sh --help"
+            exit 1
+            ;;
         *)
             echo "[ERROR] Unknown option: $1"
             print_usage
@@ -74,28 +87,22 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-case "${INSTALL_MODE}" in
-    all)
-        INSTALL_REGISTRY=true
-        INSTALL_ORCHESTRATION=true
-        ;;
-    register)
-        INSTALL_REGISTRY=true
-        INSTALL_ORCHESTRATION=false
-        if [ "${START_SAMPLE}" = "true" ]; then
-            echo "[INFO] --sample has no effect in --register mode (sample requires orchestration-center)."
-            START_SAMPLE=false
-        fi
-        ;;
-    orchestrate)
-        INSTALL_REGISTRY=false
-        INSTALL_ORCHESTRATION=true
-        ;;
-esac
+# If neither --reg nor --orc was specified, default to both (consistent
+# with configure_llm.sh's default behavior).
+if [ "${REG_FLAG_SET}" = "false" ] && [ "${ORC_FLAG_SET}" = "false" ]; then
+    INSTALL_REGISTRY=true
+    INSTALL_ORCHESTRATION=true
+fi
 
-echo "[MODE] Install mode: ${INSTALL_MODE}"
+# --sample requires orchestration-center; warn and disable if not installing it.
+if [ "${START_SAMPLE}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "false" ]; then
+    echo "[INFO] --sample has no effect without --orc (sample requires orchestration-center)."
+    START_SAMPLE=false
+fi
+
+echo "[MODE] Install targets:"
 echo "       registry-center:       ${INSTALL_REGISTRY}"
-echo "       orchestration-center:   ${INSTALL_ORCHESTRATION}"
+echo "       orchestration-center:  ${INSTALL_ORCHESTRATION}"
 echo "       agents sample:         ${START_SAMPLE}"
 echo ""
 
@@ -901,7 +908,7 @@ else
     rm -f "${TMP_TAR}"
 fi
 else
-    echo "[SKIP] registry-center download skipped (--orchestrate mode)."
+    echo "[SKIP] registry-center download skipped (--orc only, no --reg)."
 fi
 
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
@@ -923,7 +930,7 @@ else
     rm -f "${TMP_TAR}"
 fi
 else
-    echo "[SKIP] orchestration-center download skipped (--register mode)."
+    echo "[SKIP] orchestration-center download skipped (--reg only, no --orc)."
 fi
 
 # =============================================================================
@@ -1012,7 +1019,7 @@ else
     echo "=========================================="
     echo " Step 2: Setting up registry-center"
     echo "=========================================="
-    echo "  [SKIP] registry-center setup skipped (--orchestrate mode)."
+    echo "  [SKIP] registry-center setup skipped (--orc only, no --reg)."
     echo ""
 fi
 
@@ -1052,7 +1059,7 @@ else
     echo "=========================================="
     echo " Step 3: Setting up orchestration-center"
     echo "=========================================="
-    echo "  [SKIP] orchestration-center setup skipped (--register mode)."
+    echo "  [SKIP] orchestration-center setup skipped (--reg only, no --orc)."
     echo ""
 fi
 
@@ -1065,14 +1072,21 @@ echo " Step 3.5: Configuring LLM & registry URL"
 echo "=========================================="
 
 # --- LLM Configuration ---
-# No default values — user must provide their own model and URL.
-DEFAULT_LLM_MODEL=""
-DEFAULT_LLM_URL=""
+# Delegate to configure_llm.sh which handles interactive input, validation,
+# and writing. The install flags map directly to configure_llm.sh flags:
+#   --reg --orc  → --reg --orc  (interactive split-asking with reuse option)
+#   --reg        → --reg        (interactive, registry only)
+#   --orc        → --orc        (interactive, orchestration only)
+
+# Build LLM_FLAGS from install targets
+LLM_FLAGS=""
+[ "${INSTALL_REGISTRY}" = "true" ] && LLM_FLAGS="--reg"
+[ "${INSTALL_ORCHESTRATION}" = "true" ] && LLM_FLAGS="${LLM_FLAGS} --orc"
+LLM_FLAGS="${LLM_FLAGS# }"
 
 echo "[INPUT] LLM configuration is required for the chat model."
 echo ""
-echo "  You can skip this step — a ready-to-run bash command will be"
-echo "  provided for you to configure the LLM later."
+echo "  You can skip this step and run configure_llm.sh later."
 echo ""
 read -r -p "        Skip LLM configuration and configure manually? [y/N]: " SKIP_LLM_INPUT < /dev/tty || SKIP_LLM_INPUT=""
 LLM_SKIPPED=false
@@ -1080,193 +1094,17 @@ case "${SKIP_LLM_INPUT}" in
     [yY]|[yY][eE][sS])
         LLM_SKIPPED=true
         echo "  [SKIP] LLM configuration skipped."
-        echo "         A bash command will be printed at the end of this step."
+        echo "         Run configure_llm.sh later to configure."
         ;;
 esac
 
-# ---------------------------------------------------------------------------
-# Function: validate LLM API key and URL by sending a minimal test request.
-# Returns 0 if valid, 1 otherwise.
-# ---------------------------------------------------------------------------
-validate_llm() {
-    local model="$1"
-    local url="$2"
-    local api_key="$3"
-
-    # Construct the chat completions endpoint.
-    # If the URL doesn't already end with /chat/completions, append it.
-    local test_url="${url}"
-    if [[ "${test_url}" != */chat/completions ]]; then
-        test_url="${test_url%/}/chat/completions"
-    fi
-
-    echo "  [TEST] Validating LLM connection..."
-    echo "         URL:   ${test_url}"
-    echo "         Model: ${model}"
-
-    local tmp_resp http_code body
-    tmp_resp=$(mktemp /tmp/llm-validate-XXXXXX)
-    http_code=$(curl -s -o "${tmp_resp}" -w "%{http_code}" \
-        -X POST "${test_url}" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${api_key}" \
-        -d "{\"model\": \"${model}\", \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"max_tokens\": 1}" \
-        --connect-timeout 10 \
-        --max-time 30 2>/dev/null) || http_code="000"
-    body=$(cat "${tmp_resp}" 2>/dev/null)
-    rm -f "${tmp_resp}"
-
-    case "${http_code}" in
-        200|201)
-            echo "  [OK] LLM API validation successful (HTTP ${http_code})."
-            return 0
-            ;;
-        401|403)
-            echo "  [ERROR] Authentication failed (HTTP ${http_code}) — invalid API key."
-            [ -n "${body}" ] && echo "          Response: $(printf '%.300s' "${body}")"
-            return 1
-            ;;
-        404)
-            echo "  [ERROR] Endpoint not found (HTTP 404) — invalid API URL."
-            echo "          Tried: ${test_url}"
-            [ -n "${body}" ] && echo "          Response: $(printf '%.300s' "${body}")"
-            return 1
-            ;;
-        000)
-            echo "  [ERROR] Cannot connect to ${test_url}."
-            echo "          Please check the URL and your network connection."
-            return 1
-            ;;
-        *)
-            echo "  [ERROR] Validation failed (HTTP ${http_code})."
-            [ -n "${body}" ] && echo "          Response: $(printf '%.300s' "${body}")"
-            return 1
-            ;;
-    esac
-}
-
-# ---------------------------------------------------------------------------
-# Function: read_masked — read user input with asterisk masking.
-# Usage: read_masked "Prompt: " VAR_NAME
-# Reads from /dev/tty, echoes '*' for each character typed.
-# Supports backspace. Press Enter to submit.
-# ---------------------------------------------------------------------------
-read_masked() {
-    local prompt="$1"
-    local var_name="$2"
-    local char value=""
-
-    printf '%s' "${prompt}"
-    while IFS= read -rs -n1 char 2>/dev/null; do
-        # Enter / newline — end input
-        if [[ -z "${char}" ]]; then
-            break
-        fi
-        # Backspace (ASCII 0x7F) or Ctrl-H (0x08)
-        if [[ "${char}" == $'\177' || "${char}" == $'\010' ]]; then
-            if [[ -n "${value}" ]]; then
-                value="${value%?}"
-                printf '\b \b'
-            fi
-            continue
-        fi
-        value+="${char}"
-        printf '*'
-    done < /dev/tty
-    printf '\n'
-    printf -v "${var_name}" '%s' "${value}"
-}
-
 if [ "${LLM_SKIPPED}" = "false" ]; then
-# Read from /dev/tty to ensure we get user input even if stdin is redirected
-read -r -p "        Enter LLM model name: " LLM_MODEL < /dev/tty || LLM_MODEL=""
-LLM_MODEL="${LLM_MODEL:-${DEFAULT_LLM_MODEL}}"
-
-read -r -p "        Enter LLM API URL: " LLM_URL < /dev/tty || LLM_URL=""
-LLM_URL="${LLM_URL:-${DEFAULT_LLM_URL}}"
-
-read_masked "        Enter your API key: " LLM_API_KEY
-
-# Validate LLM configuration; retry until valid or user skips
-while true; do
-    if [ -z "${LLM_API_KEY}" ]; then
-        echo "  [WARN] No API key provided. Skipping validation."
-        echo "         You can manually edit llm_config.json later to set chat.api_key."
-        break
-    fi
-
-    if validate_llm "${LLM_MODEL}" "${LLM_URL}" "${LLM_API_KEY}"; then
-        break
-    fi
-
-    # Validation failed — prompt user for corrected values
+    echo "[CONFIG] Starting interactive LLM configuration via configure_llm.sh..."
     echo ""
-    echo "  [RETRY] Please re-enter LLM configuration."
-    echo "          (Type 'skip' at any prompt to bypass validation)"
-    read -r -p "        Model [${LLM_MODEL}]: " NEW_MODEL < /dev/tty || NEW_MODEL=""
-    if [ "${NEW_MODEL}" = "skip" ]; then
-        echo "  [WARN] Validation skipped. The configuration may not work correctly."
-        break
-    fi
-    LLM_MODEL="${NEW_MODEL:-${LLM_MODEL}}"
-
-    read -r -p "        API URL [${LLM_URL}]: " NEW_URL < /dev/tty || NEW_URL=""
-    if [ "${NEW_URL}" = "skip" ]; then
-        echo "  [WARN] Validation skipped. The configuration may not work correctly."
-        break
-    fi
-    LLM_URL="${NEW_URL:-${LLM_URL}}"
-
-    read_masked "        API key [***]: " NEW_KEY
-    if [ "${NEW_KEY}" = "skip" ]; then
-        echo "  [WARN] Validation skipped. The configuration may not work correctly."
-        break
-    fi
-    LLM_API_KEY="${NEW_KEY:-${LLM_API_KEY}}"
-done
-
-# Mask the key for display (show first 4 and last 4 chars)
-if [ -n "${LLM_API_KEY}" ]; then
-    KEY_LEN=${#LLM_API_KEY}
-    if [ "${KEY_LEN}" -gt 8 ]; then
-        KEY_MASK="${LLM_API_KEY:0:4}...${LLM_API_KEY: -4}"
-    else
-        KEY_MASK="***"
-    fi
-    echo "  [OK] API key set (${KEY_MASK}, length=${KEY_LEN})"
-    echo "  [OK] LLM config -> model=${LLM_MODEL}, url=${LLM_URL}"
-else
-    echo "  [WARN] No API key set. Edit llm_config.json manually to set chat.api_key."
-fi
-
-# Export API key as env var so configure_llm.sh can read it safely
-# (avoids API key appearing in ps output and shell history)
-export LLM_API_KEY
-
-# Map install mode to --project flag for configure_llm.sh
-case "${INSTALL_MODE}" in
-    all)          PROJECT_FLAG="all" ;;
-    register)     PROJECT_FLAG="registry" ;;
-    orchestrate)  PROJECT_FLAG="orchestration" ;;
-esac
-
-# Write LLM configuration via standalone configure_llm.sh script.
-# --no-validate: validation already done above by validate_llm().
-# API key is passed via LLM_API_KEY env var (not --api-key flag) for security.
-# If API key is empty, skip writing (user can run configure_llm.sh later).
-if [ -n "${LLM_API_KEY}" ]; then
-    echo "[CONFIG] Writing LLM configuration via configure_llm.sh..."
-    bash "${SCRIPT_DIR}/configure_llm.sh" \
-        --model "${LLM_MODEL}" \
-        --url "${LLM_URL}" \
-        --project "${PROJECT_FLAG}" \
-        --no-validate
-else
-    echo "  [WARN] No API key set. llm_config.json not updated."
-    echo "         Run configure_llm.sh later after obtaining an API key."
-fi
+    bash "${SCRIPT_DIR}/configure_llm.sh" ${LLM_FLAGS}
 else
     echo "  [INFO] LLM configuration skipped. Default values will be used."
+    echo "         Run configure_llm.sh later to configure."
 fi
 
 # ---------------------------------------------------------------------------
@@ -1276,28 +1114,34 @@ fi
 echo ""
 echo "[INFO] To reconfigure LLM at any time, run configure_llm.sh:"
 echo ""
+echo "  # Non-interactive (same config for both projects):"
 echo "  ./configure_llm.sh --model <model> --url <url> --api-key <key>"
 echo ""
-echo "  Or set LLM_API_KEY env var (avoids key in shell history):"
+echo "  # Interactive (configure each project separately):"
+echo "  ./configure_llm.sh --reg --orc"
+echo ""
+echo "  # Or set LLM_API_KEY env var (avoids key in shell history):"
 echo "  LLM_API_KEY=your-key ./configure_llm.sh --model <model> --url <url>"
 echo ""
 echo "  Options:"
+echo "    --reg                Configure registry-center"
+echo "    --orc                Configure orchestration-center"
+echo "                         (default: both if neither specified)"
 echo "    --model <name>       LLM model name"
 echo "    --url <url>          LLM API URL"
 echo "    --api-key <key>      API key (or LLM_API_KEY env var)"
-echo "    --project <target>   registry | orchestration | all (default: all)"
 echo "    --validate           Validate API connection (default)"
 echo "    --no-validate        Skip validation"
 echo "    -h, --help           Show help"
 echo ""
 
 # --- Configure agent_registry_url in server.conf ---
-# In --all mode: local registry-center runs HTTP, so convert https->http.
-# In --orchestrate mode: prompt user for the remote registry URL and use it as-is.
+# When both --reg and --orc: local registry-center runs HTTP, so convert https->http.
+# When --orc only (no --reg): prompt user for the remote registry URL and use it as-is.
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 SERVER_CONF="${ORCHESTRATION_DIR}/etc/conf/server.conf"
 if [ -f "${SERVER_CONF}" ]; then
-    if [ "${INSTALL_MODE}" = "orchestrate" ]; then
+    if [ "${INSTALL_REGISTRY}" = "false" ]; then
         # Prompt for the running registry center's URL
         DEFAULT_REGISTRY_URL="https://127.0.0.1:5000"
         echo ""
@@ -1311,7 +1155,7 @@ if [ -f "${SERVER_CONF}" ]; then
         sed -i "s|^agent_registry_url=.*|agent_registry_url=${USER_REGISTRY_URL}|" "${SERVER_CONF}"
         echo "  [OK] server.conf agent_registry_url set to ${USER_REGISTRY_URL}."
     else
-        # --all mode: local registry runs HTTP, fix https->http
+        # --reg --orc mode: local registry runs HTTP, fix https->http
         echo "[CONFIG] Fixing agent_registry_url in server.conf (https -> http)..."
         sed -i 's|agent_registry_url=https://|agent_registry_url=http://|' "${SERVER_CONF}"
         echo "  [OK] server.conf agent_registry_url set to http."
@@ -1405,8 +1249,8 @@ server {
 }
 NGINX_EOF
 
-# In --orchestrate mode, replace the /registry/ proxy_pass with user-provided URL
-if [ "${INSTALL_MODE}" = "orchestrate" ] && [ -n "${USER_REGISTRY_URL}" ]; then
+# When --orc only (no --reg), replace the /registry/ proxy_pass with user-provided URL
+if [ "${INSTALL_REGISTRY}" = "false" ] && [ -n "${USER_REGISTRY_URL}" ]; then
     REGISTRY_PROXY_URL="${USER_REGISTRY_URL}"
     # Ensure trailing slash for nginx proxy_pass
     [[ "${REGISTRY_PROXY_URL}" != */ ]] && REGISTRY_PROXY_URL="${REGISTRY_PROXY_URL}/"
@@ -1438,7 +1282,7 @@ else
     echo "=========================================="
     echo " Step 3.7: Configuring Nginx"
     echo "=========================================="
-    echo "  [SKIP] nginx configuration skipped (--register mode)."
+    echo "  [SKIP] nginx configuration skipped (--reg only, no --orc)."
     echo ""
 fi
 
@@ -1484,7 +1328,7 @@ free_port 5001
 echo "[START] orchestration-center backend (http://127.0.0.1:5001)..."
 cd "${ORCHESTRATION_DIR}"
 source venv/bin/activate
-if [ "${INSTALL_MODE}" = "orchestrate" ] && [ -n "${USER_REGISTRY_URL}" ]; then
+if [ "${INSTALL_REGISTRY}" = "false" ] && [ -n "${USER_REGISTRY_URL}" ]; then
     export AGENT_REGISTRY_URL="${USER_REGISTRY_URL}"
 else
     export AGENT_REGISTRY_URL="http://127.0.0.1:5000"

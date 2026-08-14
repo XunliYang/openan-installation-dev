@@ -91,8 +91,36 @@ chmod +x "${ROOT_DIR}"/bin/*
 echo "  Execute permissions granted for bin/* scripts."
 echo ""
 
-# --- Step 1: Check Python ---
-echo -e "${GREEN}[1/4] Checking Python...${NC}"
+# --- Step 1: Detect architecture and verify wheels ---
+echo -e "${GREEN}[1/5] Detecting system architecture...${NC}"
+
+RAW_ARCH="$(uname -m)"
+case "$RAW_ARCH" in
+    x86_64|amd64)
+        NORMALIZED_ARCH="x86_64"
+        ;;
+    aarch64|arm64)
+        NORMALIZED_ARCH="aarch64"
+        ;;
+    *)
+        echo -e "${RED}Error: Unsupported architecture '$RAW_ARCH'. Supported: x86_64, aarch64.${NC}"
+        _setup_exit 1
+        ;;
+esac
+echo "  Detected: ${RAW_ARCH} → ${NORMALIZED_ARCH}"
+
+# Verify wheels exist for this architecture
+ARCH_WHEELS=$(find "$WHEELS_DIR" -name "*.whl" 2>/dev/null | grep -i "$NORMALIZED_ARCH" | head -1)
+if [ -z "$ARCH_WHEELS" ]; then
+    echo -e "${RED}Error: No wheels found for architecture '${NORMALIZED_ARCH}' in wheels/ directory.${NC}"
+    echo -e "       This package may be incomplete. Re-run the packager to download both architectures."
+    _setup_exit 1
+fi
+echo -e "  ${GREEN}✓${NC} Architecture-specific wheels found"
+echo ""
+
+# --- Step 2: Check Python ---
+echo -e "${GREEN}[2/5] Checking Python...${NC}"
 
 if [ -z "$PYTHON_CMD" ]; then
     if command -v python3.12 &>/dev/null; then
@@ -124,8 +152,8 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR"
     _setup_exit 1
 fi
 
-# --- Step 2: Create virtual environment ---
-echo -e "${GREEN}[2/4] Creating virtual environment...${NC}"
+# --- Step 3: Create virtual environment ---
+echo -e "${GREEN}[3/5] Creating virtual environment...${NC}"
 
 if [ -d "$VENV_DIR" ]; then
     echo -e "${YELLOW}  venv already exists at ${VENV_DIR}, recreating...${NC}"
@@ -144,8 +172,8 @@ echo "  Virtual environment created: ${VENV_DIR}"
 # Upgrade pip within venv (from local wheels if available, skip if not)
 "${VENV_DIR}/bin/pip" install --upgrade pip --no-index --find-links="$WHEELS_DIR" 2>/dev/null || true
 
-# --- Step 3: Install dependencies from local wheels ---
-echo -e "${GREEN}[3/4] Installing dependencies from local wheels...${NC}"
+# --- Step 4: Install dependencies from local wheels ---
+echo -e "${GREEN}[4/5] Installing dependencies from local wheels...${NC}"
 
 if [ ! -d "$WHEELS_DIR" ]; then
     echo -e "${RED}Error: Wheels directory not found: ${WHEELS_DIR}${NC}"
@@ -173,8 +201,8 @@ fi
 
 echo -e "${GREEN}  Dependencies installed successfully.${NC}"
 
-# --- Step 4: Interactive configuration ---
-echo -e "${GREEN}[4/4] Configuration...${NC}"
+# --- Step 5: Interactive configuration ---
+echo -e "${GREEN}[5/5] Configuration...${NC}"
 
 if [ "$SKIP_INIT" = "true" ]; then
     echo "  Skipped (--skip-init)."

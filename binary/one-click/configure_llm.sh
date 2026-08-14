@@ -4,62 +4,98 @@
 # Updates model, url, and api_key in llm_config.json for registry-center
 # and/or orchestration-center.
 #
-# Usage: ./configure_llm.sh --model <name> --url <url> --api-key <key> \
-#                           --project registry|orchestration|all \
-#                           --validate|--no-validate
+# Supports two modes:
+# - Interactive: auto-triggered when any of --model/--url/--api-key is missing.
+#   For --reg --orc, configures registry first, then offers to reuse the same
+#   config for orchestration.
+# - Non-interactive: all parameters provided via flags, same values written
+#   to all target projects.
+#
+# Usage: ./configure_llm.sh --reg --orc --model <name> --url <url> --api-key <key>
+#        ./configure_llm.sh --reg --orc          # interactive mode
+#        ./configure_llm.sh --reg                # interactive, registry only
 # =============================================================================
 set -euo pipefail
 
 # =============================================================================
-# Argument parsing
+# Constants
 # =============================================================================
-LLM_MODEL=""
-LLM_URL=""
-API_KEY_FLAG=""
-PROJECT="all"
-VALIDATE=true
-
 DEFAULT_LLM_MODEL="qwen3.6-flash"
 DEFAULT_LLM_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# =============================================================================
+# Argument parsing
+# =============================================================================
+DO_REGISTRY=false
+DO_ORCHESTRATION=false
+LLM_MODEL_FLAG=""
+LLM_URL_FLAG=""
+API_KEY_FLAG=""
+VALIDATE=true
 
 print_usage() {
     cat << 'USAGE_EOF'
 Usage: configure_llm.sh [OPTIONS]
 
 Update LLM configuration (model, url, api_key) in llm_config.json.
+Supports interactive mode (auto-triggered when parameters are missing) and
+non-interactive mode (all parameters provided via flags).
 
 Options:
+  --reg                Configure registry-center
+  --orc                Configure orchestration-center
+                       (default: both --reg --orc if neither specified)
   --model <name>       LLM model name (default: qwen3.6-flash)
   --url <url>          LLM API URL (default: https://dashscope.aliyuncs.com/compatible-mode/v1)
   --api-key <key>      API key (or set LLM_API_KEY env var)
-  --project <target>   registry | orchestration | all (default: all)
   --validate           Validate API connection before writing (default)
-  --no-validate        Skip API validation
+  --no-validate        Skip validation
   -h, --help           Show this help message and exit
 
+Interactive mode:
+  When any of --model, --url, --api-key is missing, the script enters
+  interactive mode. If both --reg and --orc are specified, registry is
+  configured first, then the user is offered to reuse the same config
+  for orchestration.
+
 Examples:
+  # Non-interactive (same config for both projects):
   ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions --api-key your-key
-  ./configure_llm.sh --project registry --api-key your-key
-  LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions
+
+  # Interactive (configure both projects separately):
+  ./configure_llm.sh --reg --orc
+
+  # Interactive (configure only registry):
+  ./configure_llm.sh --reg
+
+  # Non-interactive (only orchestration):
+  ./configure_llm.sh --orc --model glm-5.1 --url https://... --api-key your-key
+
+  # API key via env var (avoids key in shell history):
+  LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://...
 USAGE_EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --reg)
+            DO_REGISTRY=true
+            shift
+            ;;
+        --orc)
+            DO_ORCHESTRATION=true
+            shift
+            ;;
         --model)
-            LLM_MODEL="$2"
+            LLM_MODEL_FLAG="$2"
             shift 2
             ;;
         --url)
-            LLM_URL="$2"
+            LLM_URL_FLAG="$2"
             shift 2
             ;;
         --api-key)
             API_KEY_FLAG="$2"
-            shift 2
-            ;;
-        --project)
-            PROJECT="$2"
             shift 2
             ;;
         --validate)
@@ -74,6 +110,11 @@ while [ $# -gt 0 ]; do
             print_usage
             exit 0
             ;;
+        --project)
+            echo "[ERROR] --project has been removed. Use --reg and/or --orc instead."
+            echo "        See: ./configure_llm.sh --help"
+            exit 1
+            ;;
         *)
             echo "[ERROR] Unknown option: $1"
             print_usage
@@ -82,9 +123,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Apply defaults
-LLM_MODEL="${LLM_MODEL:-${DEFAULT_LLM_MODEL}}"
-LLM_URL="${LLM_URL:-${DEFAULT_LLM_URL}}"
+# Default: if neither --reg nor --orc, do both
+if [ "${DO_REGISTRY}" = "false" ] && [ "${DO_ORCHESTRATION}" = "false" ]; then
+    DO_REGISTRY=true
+    DO_ORCHESTRATION=true
+fi
 
 # Resolve API key: --api-key flag takes priority over LLM_API_KEY env var.
 # Note: Do NOT initialize LLM_API_KEY at the top of the script, as that would
@@ -97,41 +140,51 @@ else
     LLM_API_KEY="${LLM_API_KEY:-}"
 fi
 
-if [ -z "${LLM_API_KEY}" ]; then
-    echo "[ERROR] API key is required."
-    echo "        Provide via --api-key flag or LLM_API_KEY environment variable."
-    exit 1
+# Determine if interactive mode is needed.
+# Interactive if any of model/url/api-key is not provided (flag or env var).
+API_KEY_AVAILABLE=false
+if [ -n "${API_KEY_FLAG}" ] || [ -n "${LLM_API_KEY:-}" ]; then
+    API_KEY_AVAILABLE=true
 fi
 
-# Validate --project value
-case "${PROJECT}" in
-    registry|orchestration|all) ;;
-    *)
-        echo "[ERROR] Invalid --project value: ${PROJECT}"
-        echo "        Valid values: registry, orchestration, all"
-        exit 1
-        ;;
-esac
+INTERACTIVE=false
+if [ -z "${LLM_MODEL_FLAG}" ] || [ -z "${LLM_URL_FLAG}" ] || [ "${API_KEY_AVAILABLE}" = "false" ]; then
+    INTERACTIVE=true
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # =============================================================================
-# Display configuration
+# Function: read_masked — read user input with asterisk masking.
+# Usage: read_masked "Prompt: " VAR_NAME
+# Reads from /dev/tty, echoes '*' for each character typed.
+# Supports backspace. Press Enter to submit.
 # =============================================================================
-KEY_LEN=${#LLM_API_KEY}
-if [ "${KEY_LEN}" -gt 8 ]; then
-    KEY_MASK="${LLM_API_KEY:0:4}...${LLM_API_KEY: -4}"
-else
-    KEY_MASK="***"
-fi
+read_masked() {
+    local prompt="$1"
+    local var_name="$2"
+    local char value=""
 
-echo "[CONFIG] LLM configuration:"
-echo "         model:    ${LLM_MODEL}"
-echo "         url:      ${LLM_URL}"
-echo "         api_key:  ${KEY_MASK} (length=${KEY_LEN})"
-echo "         project:  ${PROJECT}"
-echo "         validate: ${VALIDATE}"
-echo ""
+    printf '%s' "${prompt}"
+    while IFS= read -rs -n1 char 2>/dev/null; do
+        # Enter / newline — end input
+        if [[ -z "${char}" ]]; then
+            break
+        fi
+        # Backspace (ASCII 0x7F) or Ctrl-H (0x08)
+        if [[ "${char}" == $'\177' || "${char}" == $'\010' ]]; then
+            if [[ -n "${value}" ]]; then
+                value="${value%?}"
+                printf '\b \b'
+            fi
+            continue
+        fi
+        value+="${char}"
+        printf '*'
+    done < /dev/tty
+    printf '\n'
+    printf -v "${var_name}" '%s' "${value}"
+}
 
 # =============================================================================
 # Function: validate LLM API key and URL by sending a minimal test request.
@@ -149,9 +202,9 @@ validate_llm() {
         test_url="${test_url%/}/chat/completions"
     fi
 
-    echo "[TEST] Validating LLM connection..."
-    echo "       URL:   ${test_url}"
-    echo "       Model: ${model}"
+    echo "  [TEST] Validating LLM connection..."
+    echo "         URL:   ${test_url}"
+    echo "         Model: ${model}"
 
     local tmp_resp http_code body
     tmp_resp=$(mktemp /tmp/llm-validate-XXXXXX)
@@ -195,93 +248,50 @@ validate_llm() {
 }
 
 # =============================================================================
-# Step 1: Validate LLM connection (if enabled)
+# Function: mask_key — produce a masked display string for an API key.
+# Shows first 4 and last 4 characters; short keys show "***".
 # =============================================================================
-if [ "${VALIDATE}" = "true" ]; then
-    if ! validate_llm "${LLM_MODEL}" "${LLM_URL}" "${LLM_API_KEY}"; then
-        echo ""
-        echo "[ERROR] LLM validation failed. Configuration was NOT written."
-        echo "        Use --no-validate to skip validation."
-        exit 1
+mask_key() {
+    local key="$1"
+    local len=${#key}
+    if [ "${len}" -gt 8 ]; then
+        echo "${key:0:4}...${key: -4}"
+    else
+        echo "***"
     fi
-    echo ""
-else
-    echo "[SKIP] LLM validation skipped (--no-validate)."
-    echo ""
-fi
+}
 
 # =============================================================================
-# Step 2: Resolve Python command
-# Try venv python first, fall back to system python3.
-# configure_llm.sh only uses the standard library json module, so python3
-# without venv is sufficient.
+# Function: write_config — update a single llm_config.json file.
+# Args: config_path, model, url, api_key
+# Returns 0 on success, 1 on failure.
 # =============================================================================
-PYTHON_CMD=""
+write_config() {
+    local config_path="$1"
+    local model="$2"
+    local url="$3"
+    local api_key="$4"
 
-# Try registry-center venv
-if [ -x "${SCRIPT_DIR}/registry-center/venv/bin/python" ]; then
-    PYTHON_CMD="${SCRIPT_DIR}/registry-center/venv/bin/python"
-# Try orchestration-center venv
-elif [ -x "${SCRIPT_DIR}/orchestration-center/venv/bin/python" ]; then
-    PYTHON_CMD="${SCRIPT_DIR}/orchestration-center/venv/bin/python"
-# Fall back to system python3
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD="python3"
-else
-    echo "[ERROR] Python 3 is required but not found."
-    echo "        No venv found in registry-center/ or orchestration-center/,"
-    echo "        and python3 is not available in PATH."
-    exit 1
-fi
-
-echo "[PYTHON] Using: ${PYTHON_CMD}"
-echo ""
-
-# =============================================================================
-# Step 3: Build target file list based on --project flag
-# =============================================================================
-LLM_CONFIGS=()
-case "${PROJECT}" in
-    registry)
-        LLM_CONFIGS+=("${SCRIPT_DIR}/registry-center/common/config/llm_config.json")
-        ;;
-    orchestration)
-        LLM_CONFIGS+=("${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json")
-        ;;
-    all)
-        LLM_CONFIGS+=("${SCRIPT_DIR}/registry-center/common/config/llm_config.json")
-        LLM_CONFIGS+=("${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json")
-        ;;
-esac
-
-# =============================================================================
-# Step 4: Update llm_config.json files
-# =============================================================================
-# Export API key as env var so Python can read it safely (avoids shell
-# escaping issues with special characters in command-line arguments)
-export LLM_API_KEY
-export LLM_MODEL
-export LLM_URL
-
-SUCCESS_COUNT=0
-FAIL_COUNT=0
-
-for LLM_CONFIG in "${LLM_CONFIGS[@]}"; do
-    if [ ! -f "${LLM_CONFIG}" ]; then
-        echo "[WARN] ${LLM_CONFIG} not found, skipping."
+    if [ ! -f "${config_path}" ]; then
+        echo "[WARN] ${config_path} not found, skipping."
         echo "       (Is the corresponding project installed?)"
-        continue
+        return 1
     fi
 
-    echo "[CONFIG] Updating ${LLM_CONFIG}..."
+    echo "[CONFIG] Updating ${config_path}..."
 
-    if ! "${PYTHON_CMD}" -c "
+    # Use inline env vars so Python can read them safely (avoids shell
+    # escaping issues with special characters in command-line arguments)
+    if LLM_WRITE_MODEL="${model}" \
+       LLM_WRITE_URL="${url}" \
+       LLM_WRITE_API_KEY="${api_key}" \
+       "${PYTHON_CMD}" -c "
 import json, os, sys
 
 config_path = sys.argv[1]
-api_key = os.environ.get('LLM_API_KEY', '')
-model = os.environ.get('LLM_MODEL', '')
-url = os.environ.get('LLM_URL', '')
+api_key = os.environ.get('LLM_WRITE_API_KEY', '')
+model = os.environ.get('LLM_WRITE_MODEL', '')
+url = os.environ.get('LLM_WRITE_URL', '')
 
 try:
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -315,15 +325,337 @@ else:
 print(f'  chat.model    = {model}')
 print(f'  chat.url      = {url}')
 print(f'  chat.api_key  = {display}')
-" "${LLM_CONFIG}" 2>&1; then
-        echo "  [ERROR] Failed to update ${LLM_CONFIG}"
-        FAIL_COUNT=$((FAIL_COUNT + 1))
-        continue
+" "${config_path}" 2>&1; then
+        echo "  [OK] Updated: ${config_path}"
+        return 0
+    else
+        echo "  [ERROR] Failed to update ${config_path}"
+        return 1
+    fi
+}
+
+# =============================================================================
+# Step 1: Resolve Python command
+# Try venv python first, fall back to system python3.
+# configure_llm.sh only uses the standard library json module, so python3
+# without venv is sufficient.
+# =============================================================================
+PYTHON_CMD=""
+
+# Try registry-center venv
+if [ -x "${SCRIPT_DIR}/registry-center/venv/bin/python" ]; then
+    PYTHON_CMD="${SCRIPT_DIR}/registry-center/venv/bin/python"
+# Try orchestration-center venv
+elif [ -x "${SCRIPT_DIR}/orchestration-center/venv/bin/python" ]; then
+    PYTHON_CMD="${SCRIPT_DIR}/orchestration-center/venv/bin/python"
+# Fall back to system python3
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_CMD="python3"
+else
+    echo "[ERROR] Python 3 is required but not found."
+    echo "        No venv found in registry-center/ or orchestration-center/,"
+    echo "        and python3 is not available in PATH."
+    exit 1
+fi
+
+echo "[PYTHON] Using: ${PYTHON_CMD}"
+echo ""
+
+# =============================================================================
+# Step 2: Configuration
+# =============================================================================
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+if [ "${INTERACTIVE}" = "true" ]; then
+    # -------------------------------------------------------------------------
+    # Interactive mode
+    # -------------------------------------------------------------------------
+    # Per-project config variables
+    REG_MODEL="" REG_URL="" REG_API_KEY=""
+    ORC_MODEL="" ORC_URL="" ORC_API_KEY=""
+    REG_VALID=false
+    ORC_VALID=false
+
+    # Compute default values for prompts (from flags or built-in defaults)
+    DEFAULT_MODEL="${LLM_MODEL_FLAG:-${DEFAULT_LLM_MODEL}}"
+    DEFAULT_URL="${LLM_URL_FLAG:-${DEFAULT_LLM_URL}}"
+
+    # --- Registry section ---
+    if [ "${DO_REGISTRY}" = "true" ]; then
+        echo "[CONFIG] === Registry Center LLM Configuration ==="
+        echo ""
+
+        read -r -p "  Enter LLM model name [${DEFAULT_MODEL}]: " REG_MODEL < /dev/tty || REG_MODEL=""
+        REG_MODEL="${REG_MODEL:-${DEFAULT_MODEL}}"
+
+        read -r -p "  Enter LLM API URL [${DEFAULT_URL}]: " REG_URL < /dev/tty || REG_URL=""
+        REG_URL="${REG_URL:-${DEFAULT_URL}}"
+
+        if [ -n "${LLM_API_KEY}" ]; then
+            read_masked "  Enter API key [***]: " REG_API_KEY
+            REG_API_KEY="${REG_API_KEY:-${LLM_API_KEY}}"
+        else
+            read_masked "  Enter your API key: " REG_API_KEY
+        fi
+
+        # Validate with retry
+        if [ "${VALIDATE}" = "true" ]; then
+            while true; do
+                if [ -z "${REG_API_KEY}" ]; then
+                    echo "  [WARN] No API key provided. Skipping validation."
+                    break
+                fi
+                if validate_llm "${REG_MODEL}" "${REG_URL}" "${REG_API_KEY}"; then
+                    REG_VALID=true
+                    break
+                fi
+                # Validation failed — prompt user for corrected values
+                echo ""
+                echo "  [RETRY] Please re-enter LLM configuration."
+                echo "          (Type 'skip' at any prompt to bypass validation)"
+                read -r -p "        Model [${REG_MODEL}]: " NEW_MODEL < /dev/tty || NEW_MODEL=""
+                if [ "${NEW_MODEL}" = "skip" ]; then
+                    echo "  [WARN] Validation skipped. The configuration may not work correctly."
+                    break
+                fi
+                REG_MODEL="${NEW_MODEL:-${REG_MODEL}}"
+
+                read -r -p "        API URL [${REG_URL}]: " NEW_URL < /dev/tty || NEW_URL=""
+                if [ "${NEW_URL}" = "skip" ]; then
+                    echo "  [WARN] Validation skipped. The configuration may not work correctly."
+                    break
+                fi
+                REG_URL="${NEW_URL:-${REG_URL}}"
+
+                read_masked "        API key [***]: " NEW_KEY
+                if [ "${NEW_KEY}" = "skip" ]; then
+                    echo "  [WARN] Validation skipped. The configuration may not work correctly."
+                    break
+                fi
+                REG_API_KEY="${NEW_KEY:-${REG_API_KEY}}"
+            done
+        else
+            echo "  [SKIP] Validation skipped (--no-validate)."
+            REG_VALID=true
+        fi
+
+        # Display registry config
+        if [ -n "${REG_API_KEY}" ]; then
+            echo "  [OK] Registry config -> model=${REG_MODEL}, url=${REG_URL}, key=$(mask_key "${REG_API_KEY}")"
+        else
+            echo "  [WARN] No API key set for registry."
+        fi
+        echo ""
     fi
 
-    echo "  [OK] Updated: ${LLM_CONFIG}"
-    SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-done
+    # --- Orchestration section ---
+    if [ "${DO_ORCHESTRATION}" = "true" ]; then
+        # If registry was also configured and validation failed, ask whether to continue
+        if [ "${DO_REGISTRY}" = "true" ] && [ "${REG_VALID}" = "false" ]; then
+            read -r -p "  Registry validation failed. Continue to orchestration? [y/N]: " CONTINUE_ORC < /dev/tty || CONTINUE_ORC=""
+            case "${CONTINUE_ORC}" in
+                [yY]|[yY][eE][sS])
+                    echo "  [OK] Continuing to orchestration configuration."
+                    ;;
+                *)
+                    echo "  [SKIP] Orchestration configuration skipped."
+                    DO_ORCHESTRATION=false
+                    ;;
+            esac
+        fi
+
+        if [ "${DO_ORCHESTRATION}" = "true" ]; then
+            echo "[CONFIG] === Orchestration Center LLM Configuration ==="
+            echo ""
+
+            # Offer reuse option if registry was configured with an API key
+            if [ "${DO_REGISTRY}" = "true" ] && [ -n "${REG_API_KEY}" ]; then
+                read -r -p "  Use same LLM config for orchestration? [Y/n]: " REUSE_CONFIG < /dev/tty || REUSE_CONFIG=""
+                case "${REUSE_CONFIG}" in
+                    [nN]|[nN][oO])
+                        REUSE_CONFIG=false
+                        ;;
+                    *)
+                        REUSE_CONFIG=true
+                        ;;
+                esac
+
+                if [ "${REUSE_CONFIG}" = "true" ]; then
+                    ORC_MODEL="${REG_MODEL}"
+                    ORC_URL="${REG_URL}"
+                    ORC_API_KEY="${REG_API_KEY}"
+                    echo "  [OK] Using same config: model=${ORC_MODEL}, url=${ORC_URL}, key=$(mask_key "${ORC_API_KEY}")"
+
+                    # Validate reused config
+                    if [ "${VALIDATE}" = "true" ] && [ -n "${ORC_API_KEY}" ]; then
+                        if validate_llm "${ORC_MODEL}" "${ORC_URL}" "${ORC_API_KEY}"; then
+                            ORC_VALID=true
+                        else
+                            echo "  [WARN] Validation failed for reused config."
+                            echo "         Config will still be written. You may reconfigure later."
+                        fi
+                    else
+                        ORC_VALID=true
+                    fi
+                fi
+            fi
+
+            # If not reusing (or registry not configured), read separately
+            if [ -z "${ORC_MODEL}" ]; then
+                read -r -p "  Enter LLM model name [${DEFAULT_MODEL}]: " ORC_MODEL < /dev/tty || ORC_MODEL=""
+                ORC_MODEL="${ORC_MODEL:-${DEFAULT_MODEL}}"
+
+                read -r -p "  Enter LLM API URL [${DEFAULT_URL}]: " ORC_URL < /dev/tty || ORC_URL=""
+                ORC_URL="${ORC_URL:-${DEFAULT_URL}}"
+
+                if [ -n "${LLM_API_KEY}" ]; then
+                    read_masked "  Enter API key [***]: " ORC_API_KEY
+                    ORC_API_KEY="${ORC_API_KEY:-${LLM_API_KEY}}"
+                else
+                    read_masked "  Enter your API key: " ORC_API_KEY
+                fi
+
+                # Validate with retry
+                if [ "${VALIDATE}" = "true" ]; then
+                    while true; do
+                        if [ -z "${ORC_API_KEY}" ]; then
+                            echo "  [WARN] No API key provided. Skipping validation."
+                            break
+                        fi
+                        if validate_llm "${ORC_MODEL}" "${ORC_URL}" "${ORC_API_KEY}"; then
+                            ORC_VALID=true
+                            break
+                        fi
+                        # Validation failed — prompt user for corrected values
+                        echo ""
+                        echo "  [RETRY] Please re-enter LLM configuration."
+                        echo "          (Type 'skip' at any prompt to bypass validation)"
+                        read -r -p "        Model [${ORC_MODEL}]: " NEW_MODEL < /dev/tty || NEW_MODEL=""
+                        if [ "${NEW_MODEL}" = "skip" ]; then
+                            echo "  [WARN] Validation skipped. The configuration may not work correctly."
+                            break
+                        fi
+                        ORC_MODEL="${NEW_MODEL:-${ORC_MODEL}}"
+
+                        read -r -p "        API URL [${ORC_URL}]: " NEW_URL < /dev/tty || NEW_URL=""
+                        if [ "${NEW_URL}" = "skip" ]; then
+                            echo "  [WARN] Validation skipped. The configuration may not work correctly."
+                            break
+                        fi
+                        ORC_URL="${NEW_URL:-${ORC_URL}}"
+
+                        read_masked "        API key [***]: " NEW_KEY
+                        if [ "${NEW_KEY}" = "skip" ]; then
+                            echo "  [WARN] Validation skipped. The configuration may not work correctly."
+                            break
+                        fi
+                        ORC_API_KEY="${NEW_KEY:-${ORC_API_KEY}}"
+                    done
+                else
+                    echo "  [SKIP] Validation skipped (--no-validate)."
+                    ORC_VALID=true
+                fi
+            fi
+
+            # Display orchestration config
+            if [ -n "${ORC_API_KEY}" ]; then
+                echo "  [OK] Orchestration config -> model=${ORC_MODEL}, url=${ORC_URL}, key=$(mask_key "${ORC_API_KEY}")"
+            else
+                echo "  [WARN] No API key set for orchestration."
+            fi
+            echo ""
+        fi
+    fi
+
+    # --- Write phase ---
+    if [ "${DO_REGISTRY}" = "true" ] && [ -n "${REG_API_KEY}" ]; then
+        if write_config "${SCRIPT_DIR}/registry-center/common/config/llm_config.json" \
+            "${REG_MODEL}" "${REG_URL}" "${REG_API_KEY}"; then
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        else
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    elif [ "${DO_REGISTRY}" = "true" ]; then
+        echo "[WARN] No API key for registry-center. Skipping llm_config.json update."
+        echo "       Run configure_llm.sh --reg later after obtaining an API key."
+    fi
+
+    if [ "${DO_ORCHESTRATION}" = "true" ] && [ -n "${ORC_API_KEY}" ]; then
+        if write_config "${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json" \
+            "${ORC_MODEL}" "${ORC_URL}" "${ORC_API_KEY}"; then
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        else
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    elif [ "${DO_ORCHESTRATION}" = "true" ]; then
+        echo "[WARN] No API key for orchestration-center. Skipping llm_config.json update."
+        echo "       Run configure_llm.sh --orc later after obtaining an API key."
+    fi
+
+else
+    # -------------------------------------------------------------------------
+    # Non-interactive mode (all parameters provided via flags)
+    # -------------------------------------------------------------------------
+    LLM_MODEL="${LLM_MODEL_FLAG:-${DEFAULT_LLM_MODEL}}"
+    LLM_URL="${LLM_URL_FLAG:-${DEFAULT_LLM_URL}}"
+
+    if [ -z "${LLM_API_KEY}" ]; then
+        echo "[ERROR] API key is required."
+        echo "        Provide via --api-key flag or LLM_API_KEY environment variable."
+        exit 1
+    fi
+
+    # Display configuration
+    KEY_LEN=${#LLM_API_KEY}
+    KEY_MASK=$(mask_key "${LLM_API_KEY}")
+
+    echo "[CONFIG] LLM configuration:"
+    echo "         model:    ${LLM_MODEL}"
+    echo "         url:      ${LLM_URL}"
+    echo "         api_key:  ${KEY_MASK} (length=${KEY_LEN})"
+    if [ "${DO_REGISTRY}" = "true" ] && [ "${DO_ORCHESTRATION}" = "true" ]; then
+        echo "         targets:  registry + orchestration"
+    elif [ "${DO_REGISTRY}" = "true" ]; then
+        echo "         targets:  registry"
+    else
+        echo "         targets:  orchestration"
+    fi
+    echo "         validate: ${VALIDATE}"
+    echo ""
+
+    # Validate LLM connection (if enabled)
+    if [ "${VALIDATE}" = "true" ]; then
+        if ! validate_llm "${LLM_MODEL}" "${LLM_URL}" "${LLM_API_KEY}"; then
+            echo ""
+            echo "[ERROR] LLM validation failed. Configuration was NOT written."
+            echo "        Use --no-validate to skip validation."
+            exit 1
+        fi
+        echo ""
+    else
+        echo "[SKIP] LLM validation skipped (--no-validate)."
+        echo ""
+    fi
+
+    # Build target file list
+    LLM_CONFIGS=()
+    if [ "${DO_REGISTRY}" = "true" ]; then
+        LLM_CONFIGS+=("${SCRIPT_DIR}/registry-center/common/config/llm_config.json")
+    fi
+    if [ "${DO_ORCHESTRATION}" = "true" ]; then
+        LLM_CONFIGS+=("${SCRIPT_DIR}/orchestration-center/common/config/llm_config.json")
+    fi
+
+    # Write configs (same values for all targets)
+    for LLM_CONFIG in "${LLM_CONFIGS[@]}"; do
+        if write_config "${LLM_CONFIG}" "${LLM_MODEL}" "${LLM_URL}" "${LLM_API_KEY}"; then
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        else
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    done
+fi
 
 # =============================================================================
 # Summary
@@ -336,9 +668,23 @@ echo "  Updated: ${SUCCESS_COUNT} file(s)"
 if [ "${FAIL_COUNT}" -gt 0 ]; then
     echo "  Failed:  ${FAIL_COUNT} file(s)"
 fi
-echo "  Model:   ${LLM_MODEL}"
-echo "  URL:     ${LLM_URL}"
-echo "  API Key: ${KEY_MASK}"
+
+if [ "${INTERACTIVE}" = "true" ]; then
+    if [ "${DO_REGISTRY}" = "true" ] && [ -n "${REG_API_KEY}" ]; then
+        echo "  Registry:        model=${REG_MODEL}, key=$(mask_key "${REG_API_KEY}")"
+    fi
+    if [ "${DO_ORCHESTRATION}" = "true" ] && [ -n "${ORC_API_KEY}" ]; then
+        if [ "${DO_REGISTRY}" = "true" ] && [ "${ORC_MODEL}" = "${REG_MODEL}" ] && [ "${ORC_API_KEY}" = "${REG_API_KEY}" ]; then
+            echo "  Orchestration:   (same as registry)"
+        else
+            echo "  Orchestration:   model=${ORC_MODEL}, key=$(mask_key "${ORC_API_KEY}")"
+        fi
+    fi
+else
+    echo "  Model:   ${LLM_MODEL}"
+    echo "  URL:     ${LLM_URL}"
+    echo "  API Key: ${KEY_MASK}"
+fi
 echo "=========================================="
 
 if [ "${SUCCESS_COUNT}" -eq 0 ]; then

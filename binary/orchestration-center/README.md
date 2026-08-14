@@ -8,7 +8,7 @@
 
 ### 概述
 
-本目录包含 Orchestration Center（编排中心）的离线部署脚本。采用**两阶段部署模式**：在联网机器上打包，然后在气隙（离线）机器上安装。
+本目录包含 Orchestration Center（编排中心）的离线部署脚本。采用**两阶段部署模式**：在联网机器上下载双架构 wheels 并打包，然后在气隙（离线）机器上自动检测架构并安装。
 
 ### 目录文件
 
@@ -34,18 +34,15 @@
 ```bash
 # 前提条件：Python 3.12+、Node.js 20.19+、npm、互联网连接
 ./pack_offline_bundle.sh
-
-# 跳过前端构建（仅后端）
-./pack_offline_bundle.sh --skip-frontend
 ```
 
 生成的 tarball 包含：
 - 完整项目源码（Python + React）
-- 预构建的 Python 虚拟环境（venv）
-- 预构建的前端 node_modules
-- pip wheel 缓存（用于离线重建 venv）
-- npm 缓存（用于离线重建前端）
+- 预下载的 Python wheels（x86_64 + aarch64 双架构，用于离线构建 venv）
+- npm 缓存（用于离线构建前端 node_modules）
 - 配置模板文件
+
+> **注意**：venv 和 node_modules 不在打包时预构建，而是在离线机器上从 wheels 和 npm 缓存本地构建，确保架构兼容性。
 
 #### 第二阶段：在离线机器上安装
 
@@ -69,15 +66,17 @@ bin/start.sh
 | `--dir=PATH` | 安装目录（默认：`/opt/orchestration-center`） |
 | `--service` | 安装为 systemd 服务（需要 root） |
 | `--no-service` | 不安装为 systemd 服务（手动启动） |
-| `--rebuild-venv` | 从缓存的 wheels 重建 venv |
-| `--rebuild-frontend` | 从缓存的 npm 重建前端 |
+
+> **架构自动检测**：install 脚本会自动检测系统架构（`uname -m`），归一化为 `x86_64` 或 `aarch64`，并验证 wheels 目录中存在对应架构的 wheel 包。venv 和 node_modules 在离线机器上本地构建，无需手动指定架构。
 
 ### 离线机器前提条件
 
 | 组件 | 版本要求 | 说明 |
 |------|---------|------|
-| Python | 3.12+ | 系统自带，需与联网机器的大版本.小版本一致 |
-| Node.js | 20.19+ | 仅使用前端时需要 |
+| 操作系统 | Linux（x86_64 / aarch64） | 离线包包含双架构 wheels，自动检测 |
+| Python | 3.12+ | 需预装，venv 在离线机器上本地构建 |
+| Node.js | 20.19+ | 需预装（用于构建前端 node_modules） |
+| npm | — | 需预装（用于构建前端 node_modules） |
 | 根权限 | — | systemd 安装需要；手动启动则不需要 |
 
 ### 配置文件
@@ -117,7 +116,7 @@ bin/start.sh
 
 ### Overview
 
-This directory contains offline deployment scripts for the Orchestration Center. It uses a **two-phase deployment model**: package on an online machine, then install on an air-gapped (offline) machine.
+This directory contains offline deployment scripts for the Orchestration Center. It uses a **two-phase deployment model**: download dual-architecture wheels and package on an online machine, then auto-detect architecture and install on an air-gapped (offline) machine.
 
 ### Directory Files
 
@@ -143,18 +142,15 @@ This directory contains offline deployment scripts for the Orchestration Center.
 ```bash
 # Prerequisites: Python 3.12+, Node.js 20.19+, npm, internet access
 ./pack_offline_bundle.sh
-
-# Skip frontend build (backend only)
-./pack_offline_bundle.sh --skip-frontend
 ```
 
 The resulting tarball contains:
 - Full project source code (Python + React)
-- Pre-built Python virtual environment (venv)
-- Pre-built frontend node_modules
-- pip wheel cache (for offline venv rebuild)
-- npm cache (for offline frontend rebuild)
+- Pre-downloaded Python wheels (x86_64 + aarch64, for offline venv build)
+- npm cache (for offline frontend node_modules build)
 - Configuration templates
+
+> **Note**: venv and node_modules are NOT pre-built. They are built on the target machine from the bundled wheels and npm cache, ensuring architecture compatibility.
 
 #### Phase 2: Install on the Offline Machine
 
@@ -178,15 +174,17 @@ bin/start.sh
 | `--dir=PATH` | Install directory (default: `/opt/orchestration-center`) |
 | `--service` | Install as systemd service (requires root) |
 | `--no-service` | Do not install as systemd service (manual start) |
-| `--rebuild-venv` | Rebuild venv from cached wheels |
-| `--rebuild-frontend` | Rebuild frontend from cached npm |
+
+> **Architecture auto-detection**: The install script auto-detects the system architecture (`uname -m`), normalizes it to `x86_64` or `aarch64`, and verifies that matching wheels exist. venv and node_modules are built locally on the target machine — no manual arch flag needed.
 
 ### Offline Machine Prerequisites
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Python | 3.12+ | System Python; must match the major.minor of the online machine |
-| Node.js | 20.19+ | Only needed if using the frontend |
+| OS | Linux (x86_64 / aarch64) | Package contains both architectures, auto-detected |
+| Python | 3.12+ | Must be pre-installed; venv is built locally on the target machine |
+| Node.js | 20.19+ | Must be pre-installed (for building frontend node_modules) |
+| npm | — | Must be pre-installed (for building frontend node_modules) |
 | Root privileges | — | Required for systemd install; not needed for manual start |
 
 ### Configuration Files

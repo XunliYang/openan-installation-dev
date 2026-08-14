@@ -64,31 +64,31 @@ chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
 
 #### 4. 选择安装模式（可选）
 
-脚本支持三种安装模式，通过命令行参数指定：
+脚本支持通过 `--reg` 和 `--orc` 两个 flag 选择安装目标，与 `configure_llm.sh` 的 flag 设计保持一致：
 
-| 参数 | 模式 | 说明 |
-|------|------|------|
-| `--all` | 全部安装（默认） | 同时安装 registry-center 和 orchestration-center |
-| `--register` | 仅安装 registry-center | 只部署注册中心，跳过 Node.js/npm/nginx 检查 |
-| `--orchestrate` | 仅安装 orchestration-center | 只部署编排中心，会交互式询问已运行的 registry-center 地址 |
-| `-h` / `--help` | 显示帮助 | 打印用法说明并退出 |
+| 参数 | 说明 |
+|------|------|
+| `--reg` | 安装 registry-center |
+| `--orc` | 安装 orchestration-center |
+| （两者均未指定） | 默认安装两者（等同 `--reg --orc`） |
+| `--sample` | 启动 agents 示例服务（端口 8080，默认关闭） |
+| `-h` / `--help` | 显示帮助并退出 |
 
 ```bash
 # 示例
-./openan_install.sh                    # 安装全部（默认，等同 --all）
-./openan_install.sh --register         # 仅安装 registry-center
-./openan_install.sh --orchestrate      # 仅安装 orchestration-center
-./openan_install.sh --help             # 查看帮助
+./openan_install.sh                    # 安装全部（默认：--reg --orc）
+./openan_install.sh --reg               # 仅安装 registry-center
+./openan_install.sh --orc               # 仅安装 orchestration-center
+./openan_install.sh --reg --orc --sample # 安装全部并启动示例 agents
+./openan_install.sh --help              # 查看帮助
 ```
 
-> 如果同时指定 `--register` 和 `--orchestrate`，脚本会视为 `--all` 并打印提示。
->
-> `--orchestrate` 模式下，脚本会提示输入已在运行的 registry-center 的 URL（默认 `https://127.0.0.1:5000`），该 URL 将原样写入 `server.conf` 和环境变量 `AGENT_REGISTRY_URL`，不做 `https→http` 转换。
+> `--orc`（不含 `--reg`）模式下，脚本会提示输入已在运行的 registry-center 的 URL（默认 `https://127.0.0.1:5000`），该 URL 将原样写入 `server.conf` 和环境变量 `AGENT_REGISTRY_URL`，不做 `https→http` 转换。
 
 **各模式执行的步骤对比：**
 
-| 步骤 | `--all` | `--register` | `--orchestrate` |
-|------|---------|--------------|-----------------|
+| 步骤 | `--reg --orc` | `--reg` | `--orc` |
+|------|---------------|---------|---------|
 | Python 3.12+ 检查 | ✅ | ✅ | ✅ |
 | Node.js / npm 检查与安装 | ✅ | ❌ 跳过 | ✅ |
 | Nginx 检查与安装 | ✅ | ❌ 跳过 | ✅ |
@@ -105,7 +105,7 @@ chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
 | 启动 agents 示例服务 | ⬜ 可选 | ❌ | ⬜ 可选 |
 | 启动 Nginx | ✅ | ❌ | ✅ |
 
-> **关于 Assurance Agent**：即使不指定 `--sample`，`--all` 和 `--orchestrate` 模式下
+> **关于 Assurance Agent**：即使不指定 `--sample`，`--reg --orc` 和 `--orc` 模式下
 > registry-center 中仍会出现一个 "Assurance Agent"。这是 orchestration-center
 > 启动时内嵌注册的 agent（端口 8902），不是 agents 示例服务。详见
 > [ADR-006](./docs/ADR-006-orchestration-built-in-agent-self-registration.md)。
@@ -174,18 +174,18 @@ chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
 **此步骤有用户交互，详见[用户交互提示一览](#用户交互提示一览)。**
 
 - 可选择跳过 LLM 配置
-- 交互式输入 LLM 模型名、API URL、API Key
+- 委托 `configure_llm.sh` 处理交互式输入、验证和写入（`--reg --orc` 模式下分开询问 registry 和 orchestration 的配置，并提供复用选项）
 - 建议使用：
 ```
 model name: glm-5.1
 model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 ```
-- 自动验证 LLM 连通性（发送测试请求）
+- 自动验证 LLM 连通性（逐项目验证，发送测试请求）
 - 验证失败时允许重新输入或跳过
-- 将配置写入 `llm_config.json`（根据安装模式：`--all` 写两份，`--register` 仅写 registry-center，`--orchestrate` 仅写 orchestration-center）
-- 无论是否跳过，脚本都会在 Step 3.5 结束时输出 `configure_llm.sh` 的使用说明，供用户随时重新配置 LLM（通过 `--project` 参数指定目标：`--all` 对应 `all`，`--register` 对应 `registry`，`--orchestrate` 对应 `orchestration`）
-- `--all` 模式：将 `server.conf` 中的 `agent_registry_url` 从 `https://` 修正为 `http://`（避免 SSL 版本不匹配错误）
-- `--orchestrate` 模式：交互式询问用户已在运行的 registry-center 的 URL，原样写入 `server.conf` 和环境变量
+- 将配置写入 `llm_config.json`（根据安装目标：`--reg --orc` 配置两个项目，`--reg` 仅 registry-center，`--orc` 仅 orchestration-center）
+- 无论是否跳过，脚本都会在 Step 3.5 结束时输出 `configure_llm.sh` 的使用说明，供用户随时重新配置 LLM（通过 `--reg`/`--orc` 参数指定目标）
+- `--reg --orc` 模式：将 `server.conf` 中的 `agent_registry_url` 从 `https://` 修正为 `http://`（避免 SSL 版本不匹配错误）
+- `--orc`（不含 `--reg`）模式：交互式询问用户已在运行的 registry-center 的 URL，原样写入 `server.conf` 和环境变量
 
 #### Step 3.7：配置 Nginx HTTPS 反向代理
 
@@ -230,7 +230,7 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 Skip LLM configuration and configure manually? [y/N]:
 ```
 
-**这是什么**：选择是否跳过 LLM 配置步骤。如果跳过，脚本不会询问模型名、API URL 和 API Key，也不会修改 `llm_config.json`。
+**这是什么**：选择是否跳过 LLM 配置步骤。如果跳过，脚本不会询问模型名、API URL 和 API Key，也不会修改 `llm_config.json`。如果不跳过，`configure_llm.sh` 会交互式配置 LLM：`--reg --orc` 模式下先配置 registry，再提示是否为 orchestration 使用相同配置。
 
 **默认值**：`N`（不跳过，进入交互式配置）
 
@@ -247,19 +247,24 @@ Skip LLM configuration and configure manually? [y/N]:
 # 或通过环境变量传递 API key（避免 key 出现在 shell history 中）：
 LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions
 
-# 仅更新指定项目（默认 all）：
-./configure_llm.sh --project registry --api-key your-key
-./configure_llm.sh --project orchestration --api-key your-key
+# 交互模式（分开配置 registry 和 orchestration，含复用选项）：
+./configure_llm.sh --reg --orc
+
+# 仅更新指定项目（默认两者都配）：
+./configure_llm.sh --reg --api-key your-key
+./configure_llm.sh --orc --api-key your-key
 
 # 查看完整帮助：
 ./configure_llm.sh --help
 ```
 
-> **`--project` 参数与安装模式的对应关系**：`--all` → `all`（默认），`--register` → `registry`，`--orchestrate` → `orchestration`。如果指定的项目未安装，脚本会跳过并打印警告。
+> **`--reg`/`--orc` 参数与安装模式的对应关系**：安装脚本和 `configure_llm.sh` 使用相同的 flag。如果指定的项目未安装，脚本会跳过并打印警告。
 >
 > 如果跳过了交互式配置，LLM 相关功能将使用默认值，可能无法正常工作。请在启动服务前运行 `configure_llm.sh` 完成配置。
 
 ---
+
+> **`--reg --orc` 模式下的分开询问流程**：`configure_llm.sh` 会先询问 registry 的 LLM 配置（下方提示 3-5），验证通过后提示 "Use same LLM config for orchestration? [Y/n]"。选择 Y 则复用 registry 的全部配置值；选择 n 则重新询问 orchestration 的配置。仅指定 `--reg` 或 `--orc` 时只询问一个项目的配置。
 
 #### 3. LLM 模型名称
 
@@ -339,13 +344,13 @@ API key [***]:
 
 ---
 
-#### 7. Registry Center URL（仅 --orchestrate 模式）
+#### 7. Registry Center URL（仅 --orc 模式，不含 --reg）
 
 ```
 Enter registry center URL [https://127.0.0.1:5000]:
 ```
 
-**这是什么**：在 `--orchestrate` 模式下，orchestration-center 需要连接到一个已在运行的 registry-center。脚本会要求你输入其访问地址。
+**这是什么**：在 `--orc`（不含 `--reg`）模式下，orchestration-center 需要连接到一个已在运行的 registry-center。脚本会要求你输入其访问地址。
 
 **默认值**：`https://127.0.0.1:5000`
 
@@ -540,31 +545,31 @@ The script handles all downloads, configuration, and service startup automatical
 
 #### 4. Choose installation mode (optional)
 
-The script supports three installation modes via command-line flags:
+The script uses `--reg` and `--orc` flags to select installation targets, consistent with `configure_llm.sh`'s flag design:
 
-| Flag | Mode | Description |
-|------|------|-------------|
-| `--all` | Install all (default) | Install both registry-center and orchestration-center |
-| `--register` | Registry only | Deploy only registry-center; skip Node.js/npm/nginx checks |
-| `--orchestrate` | Orchestration only | Deploy only orchestration-center; prompts for running registry URL |
-| `-h` / `--help` | Show help | Print usage and exit |
+| Flag | Description |
+|------|-------------|
+| `--reg` | Install registry-center |
+| `--orc` | Install orchestration-center |
+| (neither specified) | Default: install both (equivalent to `--reg --orc`) |
+| `--sample` | Start agents examples server (port 8080, off by default) |
+| `-h` / `--help` | Show help and exit |
 
 ```bash
 # Examples
-./openan_install.sh                    # Install everything (default, same as --all)
-./openan_install.sh --register         # Install only registry-center
-./openan_install.sh --orchestrate      # Install only orchestration-center
-./openan_install.sh --help             # Show help
+./openan_install.sh                    # Install everything (default: --reg --orc)
+./openan_install.sh --reg               # Install only registry-center
+./openan_install.sh --orc               # Install only orchestration-center
+./openan_install.sh --reg --orc --sample # Install everything and start sample agents
+./openan_install.sh --help              # Show help
 ```
 
-> If both `--register` and `--orchestrate` are specified, the script treats it as `--all` and prints a notice.
->
-> In `--orchestrate` mode, the script prompts for the URL of the running registry-center (default `https://127.0.0.1:5000`). The URL is written as-is to `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion.
+> In `--orc` mode (without `--reg`), the script prompts for the URL of the running registry-center (default `https://127.0.0.1:5000`). The URL is written as-is to `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion.
 
 **Step comparison by mode:**
 
-| Step | `--all` | `--register` | `--orchestrate` |
-|------|---------|--------------|-----------------|
+| Step | `--reg --orc` | `--reg` | `--orc` |
+|------|---------------|---------|---------|
 | Python 3.12+ check | ✅ | ✅ | ✅ |
 | Node.js / npm check & install | ✅ | ❌ Skipped | ✅ |
 | Nginx check & install | ✅ | ❌ Skipped | ✅ |
@@ -581,7 +586,7 @@ The script supports three installation modes via command-line flags:
 | Start agents server | ⬜ Optional | ❌ | ⬜ Optional |
 | Start Nginx | ✅ | ❌ | ✅ |
 
-> **About Assurance Agent**: Even without `--sample`, in `--all` and `--orchestrate`
+> **About Assurance Agent**: Even without `--sample`, in `--reg --orc` and `--orc`
 > modes, an "Assurance Agent" will appear in registry-center. This is an embedded
 > agent (port 8902) registered by orchestration-center on startup, not the agents
 > examples server. See [ADR-006](./docs/ADR-006-orchestration-built-in-agent-self-registration.md).
@@ -650,18 +655,18 @@ Downloads and extracts from GitHub Release (using `curl` + `tar`, no `git clone`
 **This step involves user interaction. See [Interactive Prompts](#interactive-prompts).**
 
 - Option to skip LLM configuration
-- Interactive input for LLM model name, API URL, and API Key
+- Delegates to `configure_llm.sh` for interactive input, validation, and writing (in `--reg --orc` mode, configures registry and orchestration separately with a reuse option)
 - Suggested values:
 ```
 model name: glm-5.1
 model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 ```
-- Automatic LLM connectivity validation (sends a test request)
+- Automatic LLM connectivity validation (per-project, sends a test request)
 - Allows re-entry or skipping on validation failure
-- Writes configuration to `llm_config.json` (mode-dependent: `--all` writes both, `--register` writes registry-center only, `--orchestrate` writes orchestration-center only)
-- Regardless of whether skipped, the script always prints `configure_llm.sh` usage at the end of Step 3.5 for users to reconfigure LLM at any time (use `--project` to target specific projects: `--all` maps to `all`, `--register` maps to `registry`, `--orchestrate` maps to `orchestration`)
-- `--all` mode: Fixes `agent_registry_url` in `server.conf` from `https://` to `http://` (avoids SSL version mismatch errors)
-- `--orchestrate` mode: Interactively prompts for the running registry-center URL, written as-is to `server.conf` and environment variable
+- Writes configuration to `llm_config.json` (mode-dependent: `--reg --orc` configures both, `--reg` writes registry-center only, `--orc` writes orchestration-center only)
+- Regardless of whether skipped, the script always prints `configure_llm.sh` usage at the end of Step 3.5 for users to reconfigure LLM at any time (use `--reg`/`--orc` to target specific projects)
+- `--reg --orc` mode: Fixes `agent_registry_url` in `server.conf` from `https://` to `http://` (avoids SSL version mismatch errors)
+- `--orc` (without `--reg`) mode: Interactively prompts for the running registry-center URL, written as-is to `server.conf` and environment variable
 
 #### Step 3.7: Configure Nginx HTTPS Reverse Proxy
 
@@ -706,7 +711,7 @@ During execution, the script may present the following interactive prompts. Exce
 Skip LLM configuration and configure manually? [y/N]:
 ```
 
-**What**: Choose whether to skip the LLM configuration step. If skipped, the script will not ask for model name, API URL, or API Key, and will not modify `llm_config.json`.
+**What**: Choose whether to skip the LLM configuration step. If skipped, the script will not ask for model name, API URL, or API Key, and will not modify `llm_config.json`. If not skipped, `configure_llm.sh` handles the interactive configuration: in `--reg --orc` mode, it configures registry first, then prompts whether to use the same config for orchestration.
 
 **Default**: `N` (do not skip, enter interactive configuration)
 
@@ -723,19 +728,24 @@ Skip LLM configuration and configure manually? [y/N]:
 # Or pass API key via env var (avoids key in shell history):
 LLM_API_KEY=your-key ./configure_llm.sh --model glm-5.1 --url https://open.bigmodel.cn/api/paas/v4/chat/completions
 
-# Update only a specific project (default: all):
-./configure_llm.sh --project registry --api-key your-key
-./configure_llm.sh --project orchestration --api-key your-key
+# Interactive mode (configure registry and orchestration separately, with reuse option):
+./configure_llm.sh --reg --orc
+
+# Update only a specific project (default: both):
+./configure_llm.sh --reg --api-key your-key
+./configure_llm.sh --orc --api-key your-key
 
 # Show full help:
 ./configure_llm.sh --help
 ```
 
-> **`--project` flag maps to installation mode**: `--all` → `all` (default), `--register` → `registry`, `--orchestrate` → `orchestration`. If the specified project is not installed, the script skips it with a warning.
+> **`--reg`/`--orc` flags**: The install script and `configure_llm.sh` use the same flags. If the specified project is not installed, the script skips it with a warning.
 >
 > If you skipped interactive configuration, LLM-related features will use defaults and may not work correctly. Please run `configure_llm.sh` to configure before starting services.
 
 ---
+
+> **Split-asking flow in `--reg --orc` mode**: `configure_llm.sh` first asks for registry's LLM config (prompts 3-5 below), then after validation prompts "Use same LLM config for orchestration? [Y/n]". Choose Y to reuse all registry config values; choose n to enter orchestration config separately. When only `--reg` or `--orc` is specified, only one project is configured.
 
 #### 3. LLM Model Name
 
@@ -815,13 +825,13 @@ API key [***]:
 
 ---
 
-#### 7. Registry Center URL (--orchestrate mode only)
+#### 7. Registry Center URL (--orc mode only, without --reg)
 
 ```
 Enter registry center URL [https://127.0.0.1:5000]:
 ```
 
-**What**: In `--orchestrate` mode, the orchestration-center needs to connect to a running registry-center. The script prompts you for its URL.
+**What**: In `--orc` mode (without `--reg`), the orchestration-center needs to connect to a running registry-center. The script prompts you for its URL.
 
 **Default**: `https://127.0.0.1:5000`
 

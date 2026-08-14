@@ -7,17 +7,15 @@
 #
 # The resulting tarball contains:
 #   - Full project source code
-#   - Pre-built Python venv (all pip dependencies installed)
-#   - Pre-built frontend node_modules (npm dependencies installed)
-#   - npm cache tarball (for offline npm ci if rebuild is needed)
-#   - pip wheel cache (for offline pip install if rebuild is needed)
+#   - Pre-downloaded Python wheels (x86_64 + aarch64, for offline venv build)
+#   - npm cache (for offline frontend build on the target machine)
 #   - Config templates (user edits these on the air-gapped machine)
 #
 # Usage:
-#   ./scripts/pack_offline_bundle.sh [--skip-frontend]
+#   ./scripts/pack_offline_bundle.sh
 #
 # Prerequisites on the online machine:
-#   - Python 3.11+
+#   - Python 3.12+
 #   - Node.js 20.19+
 #   - npm
 #   - Internet access (for pip download and npm install)
@@ -36,20 +34,15 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUNDLE_NAME="orchestration-center-offline"
 BUILD_DIR="${ROOT_DIR}/.offline-build"
 BUNDLE_DIR="${BUILD_DIR}/${BUNDLE_NAME}"
-SKIP_FRONTEND=false
 
 # ─── Parse args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --skip-frontend)
-            SKIP_FRONTEND=true
-            shift
-            ;;
         --help|-h)
-            echo "Usage: $0 [--skip-frontend]"
+            echo "Usage: $0"
             echo ""
-            echo "Options:"
-            echo "  --skip-frontend   Skip building frontend dependencies (backend-only bundle)"
+            echo "Downloads wheels for both x86_64 and aarch64 architectures."
+            echo "No options needed — the packager always includes both architectures."
             exit 0
             ;;
         *)
@@ -94,21 +87,19 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 echo -e "  ${GREEN}✓${NC} Python ${PY_VERSION} ($PYTHON_BIN)"
 
-if [ "$SKIP_FRONTEND" = false ]; then
-    if ! command -v node &>/dev/null; then
-        echo -e "${RED}Error: node not found. Need Node.js 20.19+.${NC}"
-        exit 1
-    fi
-    NODE_VERSION=$(node --version | sed 's/v//')
-    echo -e "  ${GREEN}✓${NC} Node.js ${NODE_VERSION}"
-
-    if ! command -v npm &>/dev/null; then
-        echo -e "${RED}Error: npm not found.${NC}"
-        exit 1
-    fi
-    NPM_VERSION=$(npm --version)
-    echo -e "  ${GREEN}✓${NC} npm ${NPM_VERSION}"
+if ! command -v node &>/dev/null; then
+    echo -e "${RED}Error: node not found. Need Node.js 20.19+.${NC}"
+    exit 1
 fi
+NODE_VERSION=$(node --version | sed 's/v//')
+echo -e "  ${GREEN}✓${NC} Node.js ${NODE_VERSION}"
+
+if ! command -v npm &>/dev/null; then
+    echo -e "${RED}Error: npm not found.${NC}"
+    exit 1
+fi
+NPM_VERSION=$(npm --version)
+echo -e "  ${GREEN}✓${NC} npm ${NPM_VERSION}"
 
 echo ""
 
@@ -152,62 +143,97 @@ fi
 echo -e "  ${GREEN}✓${NC} Source copied"
 echo ""
 
-# ─── Build Python venv ───────────────────────────────────────────────────────
-echo -e "${YELLOW}Step 3: Building Python virtual environment...${NC}"
+# ─── Download Python wheels for both architectures ──────────────────────────
+echo -e "${YELLOW}Step 3: Downloading Python wheels (x86_64 + aarch64)...${NC}"
 
-VENV_DIR="${BUNDLE_DIR}/venv"
-"$PYTHON_BIN" -m venv "$VENV_DIR"
-echo -e "  ${GREEN}✓${NC} venv created at $VENV_DIR"
+# Create a temporary packaging venv (only used for pip download, not bundled)
+PACKAGING_VENV="${BUILD_DIR}/.packaging-venv"
+"$PYTHON_BIN" -m venv "$PACKAGING_VENV"
+echo -e "  ${GREEN}✓${NC} Packaging venv created"
 
-VENV_PIP="$VENV_DIR/bin/pip"
-VENV_PYTHON="$VENV_DIR/bin/python3"
-
-# Upgrade pip and install dependencies
-echo -e "  ${YELLOW}Installing pip dependencies (this may take a while)...${NC}"
-"$VENV_PIP" install --upgrade pip wheel setuptools
-"$VENV_PIP" install -r "${BUNDLE_DIR}/requirements.txt"
-echo -e "  ${GREEN}✓${NC} Python dependencies installed"
-
-# Also download wheels for offline re-install if needed
-echo -e "  ${YELLOW}Downloading wheels for offline fallback...${NC}"
 WHEELS_DIR="${BUNDLE_DIR}/vendor/wheels"
 mkdir -p "$WHEELS_DIR"
-"$VENV_PIP" download -r "${BUNDLE_DIR}/requirements.txt" -d "$WHEELS_DIR"
-echo -e "  ${GREEN}✓${NC} Wheels cached: $(ls "$WHEELS_DIR" | wc -l) packages"
+
+PYTHON_VERSION="3.12"
+
+# Platform tags for each architecture (newer packages like cryptography require manylinux_2_28+)
+PIP_PLATFORMS_X86_64=("manylinux_2_34_x86_64" "manylinux_2_28_x86_64" "manylinux_2_17_x86_64" "manylinux2014_x86_64")
+PIP_PLATFORMS_AARCH64=("manylinux_2_34_aarch64" "manylinux_2_28_aarch64" "manylinux_2_17_aarch64" "manylinux2014_aarch64")
+
+# Helper function to download wheels for a specific architecture
+download_wheels_for_arch() {
+    local arch_name="$1"
+    shift
+    local platforms=("$@")
+    local flags=()
+    for p in "${platforms[@]}"; do
+        flags+=("--platform" "$p")
+    done
+
+    echo -e "  ${YELLOW}Downloading binary wheels for ${arch_name}...${NC}"
+    "${PACKAGING_VENV}/bin/pip" install --upgrade pip wheel >/dev/null 2>&1
+    "${PACKAGING_VENV}/bin/pip" download \
+        -r "${BUNDLE_DIR}/requirements.txt" \
+        "${flags[@]}" \
+        --python-version "$PYTHON_VERSION" \
+        --only-binary=:all: \
+        --dest "$WHEELS_DIR" \
+        2>&1 | sed 's/^/  /' || true
+}
+
+# Download binary wheels for both architectures
+download_wheels_for_arch "x86_64" "${PIP_PLATFORMS_X86_64[@]}"
+download_wheels_for_arch "aarch64" "${PIP_PLATFORMS_AARCH64[@]}"
+
+# Download pure-Python packages (platform 'any', shared by both architectures)
+echo -e "  ${YELLOW}Downloading pure-Python wheels (platform any)...${NC}"
+"${PACKAGING_VENV}/bin/pip" download \
+    -r "${BUNDLE_DIR}/requirements.txt" \
+    --platform any \
+    --python-version "$PYTHON_VERSION" \
+    --only-binary=:all: \
+    --dest "$WHEELS_DIR" \
+    2>&1 | sed 's/^/  /' || true
+
+# Verify wheels were downloaded
+WHEEL_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | wc -l)
+X86_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | grep -i "x86_64" | wc -l)
+AARCH64_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | grep -i "aarch64" | wc -l)
+if [ "$WHEEL_COUNT" -eq 0 ]; then
+    echo -e "${RED}Error: No wheel packages downloaded. Check network and requirements.txt.${NC}"
+    exit 1
+fi
+echo -e "  ${GREEN}✓${NC} Wheels downloaded: ${WHEEL_COUNT} total (x86_64: ${X86_COUNT}, aarch64: ${AARCH64_COUNT})"
 echo ""
 
-# ─── Build frontend ──────────────────────────────────────────────────────────
-if [ "$SKIP_FRONTEND" = false ]; then
-    echo -e "${YELLOW}Step 4: Building frontend dependencies...${NC}"
+# ─── Prepare npm cache for offline frontend build ───────────────────────────
+echo -e "${YELLOW}Step 4: Preparing npm cache for offline frontend build...${NC}"
 
-    FRONTEND_DIR="${BUNDLE_DIR}/workflow-designer"
-    cd "$FRONTEND_DIR"
+FRONTEND_DIR="${BUNDLE_DIR}/workflow-designer"
+cd "$FRONTEND_DIR"
 
-    echo -e "  ${YELLOW}Running npm install (this may take a while)...${NC}"
-    npm install --force
-    echo -e "  ${GREEN}✓${NC} node_modules installed"
+echo -e "  ${YELLOW}Running npm install to fill cache (this may take a while)...${NC}"
+echo -e "  ${YELLOW}(node_modules will NOT be bundled — built on the target machine)${NC}"
+npm install --force
+echo -e "  ${GREEN}✓${NC} npm install completed (cache populated)"
 
-    # Pack npm cache for offline rebuild if needed
-    echo -e "  ${YELLOW}Packing npm cache for offline fallback...${NC}"
-    NPM_CACHE_DIR="${BUNDLE_DIR}/vendor/npm-cache"
-    mkdir -p "$NPM_CACHE_DIR"
-    # Use npm pack to create tarballs of all dependencies
-    npm cache verify 2>/dev/null || true
-    # Copy the npm cache
-    NPM_GLOBAL_CACHE=$(npm config get cache 2>/dev/null || echo "")
-    if [ -n "$NPM_GLOBAL_CACHE" ] && [ -d "$NPM_GLOBAL_CACHE" ]; then
-        cp -r "$NPM_GLOBAL_CACHE"/* "$NPM_CACHE_DIR/" 2>/dev/null || true
-        echo -e "  ${GREEN}✓${NC} npm cache copied"
-    else
-        echo -e "  ${YELLOW}⚠ npm cache not found, skipping${NC}"
-    fi
-
-    cd "$ROOT_DIR"
-    echo ""
+# Copy npm cache for offline use
+NPM_CACHE_DIR="${BUNDLE_DIR}/vendor/npm-cache"
+mkdir -p "$NPM_CACHE_DIR"
+npm cache verify 2>/dev/null || true
+NPM_GLOBAL_CACHE=$(npm config get cache 2>/dev/null || echo "")
+if [ -n "$NPM_GLOBAL_CACHE" ] && [ -d "$NPM_GLOBAL_CACHE" ]; then
+    cp -r "$NPM_GLOBAL_CACHE"/* "$NPM_CACHE_DIR/" 2>/dev/null || true
+    echo -e "  ${GREEN}✓${NC} npm cache copied to vendor/npm-cache/"
 else
-    echo -e "${YELLOW}Step 4: Skipping frontend (--skip-frontend)${NC}"
-    echo ""
+    echo -e "  ${YELLOW}⚠ npm cache not found, frontend offline build may fail${NC}"
 fi
+
+# Clean up node_modules — not bundled (target machine will rebuild from cache)
+rm -rf "$FRONTEND_DIR/node_modules"
+
+cd "$ROOT_DIR"
+echo ""
 
 # ─── Copy in the offline install script ──────────────────────────────────────
 echo -e "${YELLOW}Step 5: Adding offline install script...${NC}"
@@ -234,17 +260,20 @@ cat > "$MANIFEST" << EOF
 Bundle created:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 Created on host:   $(hostname)
 Python version:    $("$PYTHON_BIN" --version)
-Node.js version:   $(node --version 2>/dev/null || echo 'N/A (frontend skipped)')
-npm version:       $(npm --version 2>/dev/null || echo 'N/A (frontend skipped)')
+Node.js version:   $(node --version)
+npm version:       $(npm --version)
+Target archs:      x86_64, aarch64
 
 Contents:
   - Project source code (Python + React)
-  - venv/                — Pre-built Python virtual environment
-  - vendor/wheels/       — pip wheels for offline re-install
-  - vendor/npm-cache/    — npm cache for offline rebuild (if frontend bundled)
-  - workflow-designer/node_modules/ — Pre-built frontend deps (if frontend bundled)
+  - vendor/wheels/       — Pre-downloaded Python wheels (x86_64 + aarch64)
+  - vendor/npm-cache/    — npm cache for offline frontend build
   - etc/conf/            — Configuration files (EDIT THESE on target machine)
   - common/config/       — LLM configuration (EDIT THESE on target machine)
+
+Note: venv and node_modules are NOT pre-built. They will be created on the
+target machine from the bundled wheels and npm cache. This ensures architecture
+compatibility (the target machine may have a different CPU architecture).
 
 To install on the air-gapped machine:
   1. Extract: tar xzf orchestration-center-offline-bundle.tar.gz

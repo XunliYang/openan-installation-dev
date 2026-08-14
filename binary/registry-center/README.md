@@ -8,7 +8,7 @@
 
 ### 概述
 
-本目录包含 Registry Center（注册中心）的离线部署脚本。采用**两阶段部署模式**：在联网机器上下载目标架构的 wheel 包并打包，然后在气隙（离线）机器上安装和配置。
+本目录包含 Registry Center（注册中心）的离线部署脚本。采用**两阶段部署模式**：在联网机器上下载 x86_64 和 aarch64 双架构的 wheel 包并打包，然后在气隙（离线）机器上自动检测架构并安装。
 
 ### 目录文件
 
@@ -34,9 +34,6 @@
 # 前提条件：Python 3.12+、互联网连接
 ./bin/package_offline.sh
 
-# 指定目标架构和 Python 版本
-./bin/package_offline.sh --arch=aarch64 --python-version=3.12
-
 # 指定版本号和输出目录
 ./bin/package_offline.sh --version=1.0.0 --output=dist
 ```
@@ -45,27 +42,28 @@
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--arch=ARCH` | 目标架构：`x86_64` 或 `aarch64` | 当前机器架构 |
 | `--python-version=VER` | 目标 Python 版本 | `3.12` |
 | `--version=VER` | 包版本号 | `1.0.0` |
 | `--output=DIR` | 输出目录 | `./dist` |
+
+> 打包脚本无条件下载 x86_64 和 aarch64 双架构 wheels，无需指定目标架构。
 
 打包过程：
 1. 验证 Python 3.12+ 环境
 2. 创建打包用虚拟环境
 3. 复制项目源码
-4. 下载目标架构的 wheel 包（支持 manylinux_2_34/2_28/2_17/2014）
+4. 下载 x86_64 和 aarch64 双架构 wheel 包（支持 manylinux_2_34/2_28/2_17/2014）
 5. 生成 `README_OFFLINE.txt`
 6. 创建 `tar.gz` 压缩包
 
-> **架构说明**：如果目标机器是 ARM64（如鲲鹏、飞腾），必须在联网机器上指定 `--arch=aarch64`，否则下载的 wheel 包无法在目标机器上安装。
+> **架构说明**：离线包同时包含 x86_64 和 aarch64 双架构的 wheel 包。setup 脚本会自动检测离线机器的架构并安装对应的 wheels，无需手动指定。
 
 #### 第二阶段：在离线机器上安装
 
 ```bash
 # 1. 解压离线包
-tar -xzf registry-center-1.0.0-linux-x86_64.tar.gz
-cd registry-center-1.0.0-linux-x86_64
+tar -xzf registry-center-1.0.0-linux.tar.gz
+cd registry-center-1.0.0-linux
 
 # 2. 运行安装脚本（推荐用 source 激活 venv）
 source bin/setup_offline.sh
@@ -90,11 +88,14 @@ bin/stop.sh
 | `--skip-init` | 跳过交互式配置向导 |
 | `--python=PATH` | 指定 Python 解释器（默认自动检测 `python3.12`） |
 
+> **架构自动检测**：setup 脚本会自动检测系统架构（`uname -m`），归一化为 `x86_64` 或 `aarch64`，并验证 wheels 目录中存在对应架构的 wheel 包。无需手动指定架构。
+
 安装过程：
-1. 检查 Python（最低 3.10+）
-2. 创建虚拟环境（venv）
-3. 从本地 wheels 安装依赖（无需联网）
-4. 运行交互式配置向导（可跳过）
+1. 检测系统架构并验证 wheels（自动检测 `x86_64` / `aarch64`）
+2. 检查 Python（最低 3.10+）
+3. 创建虚拟环境（venv）
+4. 从本地 wheels 安装依赖（无需联网）
+5. 运行交互式配置向导（可跳过）
 
 > **注意**：使用 `source` 执行脚本可在当前 shell 中激活虚拟环境。直接执行（`./bin/setup_offline.sh`）则不会激活，需手动运行 `source venv/bin/activate`。
 
@@ -102,7 +103,7 @@ bin/stop.sh
 
 | 组件 | 版本要求 | 说明 |
 |------|---------|------|
-| 操作系统 | Linux（x86_64 / aarch64） | 需与打包时指定的架构一致 |
+| 操作系统 | Linux（x86_64 / aarch64） | 离线包包含双架构 wheels，自动检测 |
 | Python | 3.10+（推荐 3.12） | 需预装 |
 | 网络连接 | 不需要 | 完全离线运行 |
 
@@ -152,13 +153,13 @@ sudo ./bin/install_service.sh uninstall
 ### 目录结构
 
 ```
-registry-center-1.0.0-linux-x86_64/
+registry-center-1.0.0-linux/
 ├── agent_registry/       应用源码
 ├── common/               共享模块和配置模板
 ├── etc/conf/             配置文件
 ├── etc/systemd/          systemd 服务模板
 ├── bin/                  运维脚本
-├── wheels/               预下载的 Python wheel 包
+├── wheels/               预下载的 Python wheel 包（x86_64 + aarch64）
 ├── venv/                 虚拟环境（由 setup_offline.sh 创建）
 ├── log/                  运行日志
 ├── run/                  PID/socket 文件
@@ -169,7 +170,7 @@ registry-center-1.0.0-linux-x86_64/
 ### 常见问题
 
 **Q: wheel 包安装失败怎么办？**
-A: 检查打包时指定的 `--arch` 是否与目标机器架构一致。ARM64 机器必须使用 `--arch=aarch64` 打包。
+A: 离线包包含 x86_64 和 aarch64 双架构 wheels。如果安装失败，检查 wheels 目录中是否存在对应架构的 wheel 包（文件名包含 `x86_64` 或 `aarch64`）。可能是打包过程中网络问题导致某种架构的 wheels 下载不完整，重新运行打包脚本即可。
 
 **Q: 如何重新配置？**
 A: 运行 `./venv/bin/python -m agent_registry.init`，可随时重新配置 IP、端口、TLS、存储等。
@@ -183,7 +184,7 @@ A: 删除 `venv/` 目录后重新运行 `source bin/setup_offline.sh`，会从�
 
 ### Overview
 
-This directory contains offline deployment scripts for the Registry Center. It uses a **two-phase deployment model**: download target-architecture wheels and package on an online machine, then install and configure on an air-gapped (offline) machine.
+This directory contains offline deployment scripts for the Registry Center. It uses a **two-phase deployment model**: download wheels for both x86_64 and aarch64 architectures and package on an online machine, then auto-detect architecture and install on an air-gapped (offline) machine.
 
 ### Directory Files
 
@@ -209,9 +210,6 @@ This directory contains offline deployment scripts for the Registry Center. It u
 # Prerequisites: Python 3.12+, internet access
 ./bin/package_offline.sh
 
-# Specify target architecture and Python version
-./bin/package_offline.sh --arch=aarch64 --python-version=3.12
-
 # Specify version label and output directory
 ./bin/package_offline.sh --version=1.0.0 --output=dist
 ```
@@ -220,27 +218,28 @@ Supported options:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--arch=ARCH` | Target architecture: `x86_64` or `aarch64` | Current machine arch |
 | `--python-version=VER` | Target Python version | `3.12` |
 | `--version=VER` | Package version label | `1.0.0` |
 | `--output=DIR` | Output directory | `./dist` |
+
+> The packager downloads wheels for both x86_64 and aarch64 unconditionally. No need to specify a target architecture.
 
 Packaging process:
 1. Verify Python 3.12+ environment
 2. Create a packaging virtual environment
 3. Copy project source code
-4. Download wheels for the target architecture (supports manylinux_2_34/2_28/2_17/2014)
+4. Download wheels for both x86_64 and aarch64 (supports manylinux_2_34/2_28/2_17/2014)
 5. Generate `README_OFFLINE.txt`
 6. Create the `tar.gz` archive
 
-> **Architecture note**: If the target machine is ARM64 (e.g., Kunpeng, Phytium), you must specify `--arch=aarch64` on the online machine. Otherwise, the downloaded wheels will not install on the target.
+> **Architecture note**: The offline package contains wheels for both x86_64 and aarch64. The setup script auto-detects the machine architecture and installs the matching wheels. No manual arch specification needed.
 
 #### Phase 2: Install on the Offline Machine
 
 ```bash
 # 1. Extract the package
-tar -xzf registry-center-1.0.0-linux-x86_64.tar.gz
-cd registry-center-1.0.0-linux-x86_64
+tar -xzf registry-center-1.0.0-linux.tar.gz
+cd registry-center-1.0.0-linux
 
 # 2. Run the setup script (use 'source' to activate venv in your shell)
 source bin/setup_offline.sh
@@ -265,11 +264,14 @@ bin/stop.sh
 | `--skip-init` | Skip the interactive configuration wizard |
 | `--python=PATH` | Python interpreter to use (default: auto-detect `python3.12`) |
 
+> **Architecture auto-detection**: The setup script auto-detects the system architecture (`uname -m`), normalizes it to `x86_64` or `aarch64`, and verifies that matching wheels exist. No manual arch flag needed.
+
 Setup process:
-1. Check Python (minimum 3.10+)
-2. Create a virtual environment (venv)
-3. Install dependencies from local wheels (no internet needed)
-4. Run interactive configuration wizard (can be skipped)
+1. Detect system architecture and verify wheels (auto-detects `x86_64` / `aarch64`)
+2. Check Python (minimum 3.10+)
+3. Create a virtual environment (venv)
+4. Install dependencies from local wheels (no internet needed)
+5. Run interactive configuration wizard (can be skipped)
 
 > **Note**: Use `source` to run the script so the venv is activated in your current shell. If you run it directly (`./bin/setup_offline.sh`), the venv will not be activated; you must manually run `source venv/bin/activate`.
 
@@ -277,7 +279,7 @@ Setup process:
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| OS | Linux (x86_64 / aarch64) | Must match the architecture specified during packaging |
+| OS | Linux (x86_64 / aarch64) | Package contains both architectures, auto-detected |
 | Python | 3.10+ (3.12 recommended) | Must be pre-installed |
 | Network | Not required | Fully offline operation |
 
@@ -327,13 +329,13 @@ sudo ./bin/install_service.sh uninstall
 ### Directory Layout
 
 ```
-registry-center-1.0.0-linux-x86_64/
+registry-center-1.0.0-linux/
 ├── agent_registry/       Application source code
 ├── common/               Shared modules and config templates
 ├── etc/conf/             Configuration files
 ├── etc/systemd/          Systemd service templates
 ├── bin/                  Operational scripts
-├── wheels/               Pre-downloaded Python wheel packages
+├── wheels/               Pre-downloaded Python wheel packages (x86_64 + aarch64)
 ├── venv/                 Virtual environment (created by setup_offline.sh)
 ├── log/                  Runtime logs
 ├── run/                  PID/socket files
@@ -344,7 +346,7 @@ registry-center-1.0.0-linux-x86_64/
 ### Troubleshooting
 
 **Q: Wheel installation failed. What should I do?**
-A: Verify that the `--arch` specified during packaging matches the target machine architecture. ARM64 machines must be packaged with `--arch=aarch64`.
+A: The offline package contains wheels for both x86_64 and aarch64. If installation fails, check that the wheels directory contains arch-specific wheels (filenames containing `x86_64` or `aarch64`). A network issue during packaging may have caused incomplete downloads for one architecture. Re-run the packager to fix.
 
 **Q: How do I reconfigure?**
 A: Run `./venv/bin/python -m agent_registry.init` to reconfigure IP, port, TLS, storage, etc. at any time.

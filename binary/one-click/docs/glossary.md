@@ -68,16 +68,19 @@ Node.js 的包管理器。在预编译二进制中随 Node.js 自带；在 Debia
 
 ## 安装模式 (Installation Mode)
 
-脚本通过命令行参数控制安装哪些组件。三种模式对应不同的 `INSTALL_REGISTRY` 和
-`INSTALL_ORCHESTRATION` 布尔标志组合：
+脚本通过 `--reg` 和 `--orc` 两个命令行 flag 控制安装哪些组件，与 `configure_llm.sh`
+的 flag 设计保持一致。两个 flag 对应不同的 `INSTALL_REGISTRY` 和 `INSTALL_ORCHESTRATION`
+布尔标志组合：
 
 | 参数 | INSTALL_REGISTRY | INSTALL_ORCHESTRATION | 说明 |
 |------|-------------------|----------------------|------|
-| `--all`（默认） | true | true | 同时安装 registry-center 和 orchestration-center |
-| `--register` | true | false | 仅安装 registry-center |
-| `--orchestrate` | false | true | 仅安装 orchestration-center |
+| `--reg --orc`（默认） | true | true | 同时安装 registry-center 和 orchestration-center |
+| `--reg` | true | false | 仅安装 registry-center |
+| `--orc` | false | true | 仅安装 orchestration-center |
 
-所有模式相关的步骤（环境检查、下载、配置、启动）均通过这两个标志进行条件控制。
+两者均未指定时默认安装两者。所有模式相关的步骤（环境检查、下载、配置、启动）均通过这两个
+标志进行条件控制。旧 flag `--all`/`--register`/`--orchestrate` 已移除，使用旧 flag 会
+报错并提示使用 `--reg`/`--orc`（见 ADR-010）。
 
 ## Heredoc 拆分 (Heredoc Splitting)
 
@@ -86,13 +89,13 @@ Node.js 的包管理器。在预编译二进制中随 Node.js 自带；在 Debia
 - 动态中间段（使用 `echo` + 条件判断输出变量内容）
 - 静态尾部 heredoc（单引号分隔符，零变量展开）
 
-用于手动 LLM 命令输出中根据安装模式动态生成文件列表（见 ADR-002）。
+用于手动 LLM 命令输出中根据安装目标动态生成文件列表（见 ADR-002）。
 
 ## 手动 LLM 命令 (Manual LLM Command) — 已废弃
 
 Step 3.5 结束时输出的 bash 命令片段，供用户随时重新配置 LLM（修改 model、url、api_key）。
-无论用户是否跳过交互式 LLM 配置，该命令都会输出。文件列表根据安装模式动态生成：
-`--all` 包含两个项目，`--register` 仅 registry-center，`--orchestrate` 仅 orchestration-center。
+无论用户是否跳过交互式 LLM 配置，该命令都会输出。文件列表根据安装目标动态生成：
+`--reg --orc` 包含两个项目，`--reg` 仅 registry-center，`--orc` 仅 orchestration-center。
 
 **已由 `configure_llm.sh` 替代**（见 ADR-005）。原 60 行 bash 片段被替换为
 `configure_llm.sh` 的使用说明。
@@ -123,7 +126,7 @@ nginx 二进制路径查找辅助函数。采用两级查找策略：
 
 Summary 输出段中用于显示远程访问 URL 的 VPS 网卡 IP 变量。通过 `hostname -I`
 获取第一个非回环 IP，失败时回退到 `localhost`。仅用于 frontend 和 nginx 两行的
-URL 显示，其余服务保持 `127.0.0.1`（因 `--register` 模式无 nginx 代理，
+URL 显示，其余服务保持 `127.0.0.1`（因仅 `--reg` 模式无 nginx 代理，
 直接显示内网地址更准确）（见 ADR-004）。
 
 ## 远程访问入口 (Remote Access Entry Point)
@@ -144,10 +147,10 @@ Linux 命令，输出所有非回环网卡的 IP 地址（空格分隔）。与 
 ## configure_llm.sh
 
 独立 LLM 配置脚本，从 `openan_install.sh` 中提取的 LLM 参数修改逻辑。通过 flag
-接收参数（`--model`、`--url`、`--api-key`、`--project`、`--validate`/`--no-validate`），
-替代了原 Step 3.5 中的手动 bash 命令输出段。支持从 `LLM_API_KEY` 环境变量读取
-API key（避免 key 出现在 shell history 中）。基于脚本自身目录（SCRIPT_DIR）查找
-`registry-center/` 和 `orchestration-center/` 项目目录（见 ADR-005）。
+接收参数（`--reg`、`--orc`、`--model`、`--url`、`--api-key`、`--validate`/`--no-validate`），
+支持交互式和非交互式两种模式。当 `--model`/`--url`/`--api-key` 任意一个缺失时自动进入
+交互模式；`--reg --orc` 同时指定时支持分开询问 registry 和 orchestration 的 LLM 配置
+并提供复用选项。`openan_install.sh` Step 3.5 直接委托调用此脚本（见 ADR-005、ADR-010）。
 
 ## Flag 传入 (Flag-based Input)
 
@@ -159,16 +162,46 @@ API key（避免 key 出现在 shell history 中）。基于脚本自身目录�
 ## API Key 环境变量回退 (API Key Env Var Fallback)
 
 `configure_llm.sh` 的安全设计：`--api-key` flag 优先，未指定时从 `LLM_API_KEY`
-环境变量读取。`openan_install.sh` 调用 `configure_llm.sh` 时不传 `--api-key` flag，
-而是通过已 `export` 的 `LLM_API_KEY` 环境变量传递，避免 API key 出现在 `ps` 输出
-和 shell history 中（见 ADR-005）。
+环境变量读取。在非交互模式下，环境变量作为 API key 来源；在交互模式下，环境变量的值
+作为提示中的默认值（显示 `[***]`），用户可直接回车采用或输入新值。避免 API key 出现在
+`ps` 输出和 shell history 中（见 ADR-005、ADR-010）。
 
-## --project 标志 (--project Flag)
+## --reg/--orc 标志 (--reg/--orc Flags)
 
-`configure_llm.sh` 的目标项目选择参数。可选值：`registry`（仅 registry-center）、
-`orchestration`（仅 orchestration-center）、`all`（两者都更新，默认）。与
-`openan_install.sh` 的安装模式映射：`--all` → `all`，`--register` → `registry`，
-`--orchestrate` → `orchestration`。缺失项目目录时打印 `[WARN]` 并跳过（见 ADR-005）。
+`configure_llm.sh` 和 `openan_install.sh` 共同使用的目标项目选择参数（ADR-010）。`--reg`
+配置 registry-center，`--orc` 配置 orchestration-center，同时指定时配置两者，两者均未
+指定时默认配置两者。两个脚本的 flag 语义完全一致，`openan_install.sh` 直接将安装 flag
+传递给 `configure_llm.sh`。缺失项目目录时打印 `[WARN]` 并跳过
+（见 ADR-005、ADR-010）。
+
+## 交互模式自动触发 (Interactive Mode Auto-trigger)
+
+`configure_llm.sh` 的模式选择机制：当 `--model`、`--url`、`--api-key` 三个参数中任意
+一个未提供（且 `LLM_API_KEY` 环境变量也未设置时），自动进入交互模式。已提供的参数作为
+交互提示中的默认值。三个参数全部提供时走非交互模式（同值写入所有目标项目，与原 `--project`
+行为一致）（见 ADR-010）。
+
+## 分开询问与复用选项 (Split Asking with Reuse Option)
+
+`configure_llm.sh` 交互模式下 `--reg --orc` 的配置流程：先询问 registry 的
+model/url/api_key 并验证，然后提示 "Use same LLM config for orchestration? [Y/n]"。
+选择 Y 则复用 registry 的全部值（model + url + api_key）；选择 n 则重新输入
+orchestration 的配置。registry 验证失败时询问是否继续配置 orchestration。此流程使
+两个项目可配置不同的 LLM 参数（见 ADR-010）。
+
+## 逐项目验证 (Per-project Validation)
+
+`configure_llm.sh` 交互模式下的验证策略：每个项目的 LLM 配置独立验证（发送测试请求
+到 LLM API）。验证失败时允许重新输入或输入 `skip` 跳过验证。registry 验证失败不影响
+orchestration 的配置流程（用户可选择继续）。复用配置时也会验证（同一 API 端点，结果
+应一致）（见 ADR-010）。
+
+## read_masked 掩码输入 (Masked Input)
+
+从 `openan_install.sh` 复制到 `configure_llm.sh` 的函数，用于交互模式下安全输入
+API key。读取 `/dev/tty`，每输入一个字符显示一个 `*`，支持退格。在 ADR-010 中，
+此函数不再在两个脚本中各存一份——`openan_install.sh` 的 Step 3.5 已删除自身的
+`read_masked` 副本，委托给 `configure_llm.sh` 处理全部交互逻辑（见 ADR-010）。
 
 ## venv 优先 Python 解析 (venv-first Python Resolution)
 
@@ -376,3 +409,31 @@ kill 即可终止全部端口监听。扩展端口范围确保该进程在所有
 
 与多进程模型（每个 agent 独立进程）不同，单进程模型下不需要逐端口 kill
 （见 ADR-009）。
+
+## 架构归一化 (Architecture Normalization)
+
+离线 setup/install 脚本中的 CPU 架构检测与标准化逻辑。`uname -m` 在不同 Linux
+发行版上可能返回不同字符串表示同一架构：`x86_64` / `amd64` 均指 x86-64 架构，
+`aarch64` / `arm64` 均指 ARM 64 架构。脚本通过 case 语句将多种别名归一化为
+标准值 `x86_64` 或 `aarch64`，用于后续 wheels 匹配。不支持的架构直接报错退出
+（见 ADR-011）。
+
+## 双架构 Wheels (Dual-arch Wheels)
+
+离线打包策略：一个离线包内同时包含 x86_64 和 aarch64 两种架构的 Python wheel
+包，混放在同一个 `wheels/` 目录中。pip 的 `--find-links` 会根据当前架构自动
+选择匹配的 wheel（通过文件名中的平台标签如 `manylinux_2_34_x86_64` 或
+`manylinux_2_34_aarch64` 区分），同名不同架构的 wheel 可共存。pure-Python
+wheel（平台标签 `any`）只下载一份，两种架构共用。打包机自身架构无关——
+`pip download --platform` 在任意架构的机器上均可下载任意目标架构的 wheels
+（见 ADR-011）。
+
+## 纯 Wheel 策略 (Wheel-only Strategy)
+
+离线打包策略：联网机器上不构建 Python venv，只用 `pip download --platform`
+下载 wheel 包；离线机器上从 wheels 本地构建 venv（`pip install --no-index
+--find-links wheels/`）。与 pre-built venv 策略（在联网机器上构建好 venv 直接
+打包）不同，纯 wheel 策略的 venv 在离线机器上本地构建，架构和 Python 版本
+自然匹配，不存在跨架构或版本不兼容问题。registry-center 原本即采用此策略，
+orchestration-center 自 ADR-011 起也从 pre-built venv 改为纯 wheel 策略
+（见 ADR-011）。

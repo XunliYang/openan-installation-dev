@@ -20,11 +20,12 @@
 # ============================================================================
 # package_offline.sh - Build offline deployment package
 #
-# Runs on the ONLINE machine. Downloads target-architecture wheel packages
-# and bundles the project into a self-contained tar.gz for air-gapped deploy.
+# Runs on the ONLINE machine. Downloads wheel packages for both x86_64 and
+# aarch64 architectures and bundles the project into a self-contained tar.gz
+# for air-gapped deploy.
 #
 # Usage:
-#   ./bin/package_offline.sh [--arch=x86_64|aarch64] [--python-version=3.12]
+#   ./bin/package_offline.sh [--python-version=3.12]
 #                            [--version=1.0.0] [--output=dist]
 # ============================================================================
 
@@ -39,7 +40,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Defaults
-TARGET_ARCH="$(uname -m)"
 PYTHON_VERSION="3.12"
 VERSION="1.0.0"
 OUTPUT_DIR="${ROOT_DIR}/dist"
@@ -48,18 +48,18 @@ usage() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  --arch=ARCH             Target architecture: x86_64 or aarch64 (default: current)"
     echo "  --python-version=VER    Target Python version (default: 3.12)"
     echo "  --version=VER           Package version label (default: 1.0.0)"
     echo "  --output=DIR            Output directory (default: ./dist)"
     echo "  -h, --help              Show this help"
+    echo ""
+    echo "Downloads wheels for both x86_64 and aarch64 architectures."
     exit 0
 }
 
 # Parse arguments
 for arg in "$@"; do
     case "$arg" in
-        --arch=*) TARGET_ARCH="${arg#*=}" ;;
         --python-version=*) PYTHON_VERSION="${arg#*=}" ;;
         --version=*) VERSION="${arg#*=}" ;;
         --output=*) OUTPUT_DIR="${arg#*=}" ;;
@@ -68,41 +68,32 @@ for arg in "$@"; do
     esac
 done
 
-# Validate architecture
-if [[ "$TARGET_ARCH" != "x86_64" && "$TARGET_ARCH" != "aarch64" ]]; then
-    echo -e "${RED}Error: Unsupported architecture '$TARGET_ARCH'. Use x86_64 or aarch64.${NC}"
-    exit 1
-fi
+# Build list of pip platform tags for both architectures
+# (newer packages like cryptography require manylinux_2_28+)
+PIP_PLATFORMS_X86_64=(
+    "manylinux_2_34_x86_64"
+    "manylinux_2_28_x86_64"
+    "manylinux_2_17_x86_64"
+    "manylinux2014_x86_64"
+)
+PIP_PLATFORMS_AARCH64=(
+    "manylinux_2_34_aarch64"
+    "manylinux_2_28_aarch64"
+    "manylinux_2_17_aarch64"
+    "manylinux2014_aarch64"
+)
 
-# Build list of pip platform tags (newer packages like cryptography require manylinux_2_28+)
-PIP_PLATFORMS=()
-case "$TARGET_ARCH" in
-    x86_64)
-        PIP_PLATFORMS+=("manylinux_2_34_x86_64")
-        PIP_PLATFORMS+=("manylinux_2_28_x86_64")
-        PIP_PLATFORMS+=("manylinux_2_17_x86_64")
-        PIP_PLATFORMS+=("manylinux2014_x86_64")
-        ;;
-    aarch64)
-        PIP_PLATFORMS+=("manylinux_2_34_aarch64")
-        PIP_PLATFORMS+=("manylinux_2_28_aarch64")
-        PIP_PLATFORMS+=("manylinux_2_17_aarch64")
-        PIP_PLATFORMS+=("manylinux2014_aarch64")
-        ;;
-esac
-
-PKG_NAME="registry-center-${VERSION}-linux-${TARGET_ARCH}"
+PKG_NAME="registry-center-${VERSION}-linux"
 BUILD_DIR="${OUTPUT_DIR}/build/${PKG_NAME}"
 WHEELS_DIR="${BUILD_DIR}/wheels"
 
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN} Registry Center Offline Packager${NC}"
 echo -e "${GREEN}============================================${NC}"
-echo "  Version:        ${VERSION}"
-echo "  Target arch:    ${TARGET_ARCH}"
-echo "  Python version: ${PYTHON_VERSION}"
-echo "  Pip platforms:  ${PIP_PLATFORMS[*]}"
-echo "  Output:         ${OUTPUT_DIR}"
+echo "  Version:         ${VERSION}"
+echo "  Target archs:    x86_64, aarch64"
+echo "  Python version:  ${PYTHON_VERSION}"
+echo "  Output:          ${OUTPUT_DIR}"
 echo ""
 
 # --- Step 1: Verify Python 3.12+ ---
@@ -169,26 +160,38 @@ mkdir -p "${BUILD_DIR}/log" "${BUILD_DIR}/run" "${BUILD_DIR}/data"
 
 echo "  Source copied."
 
-# --- Step 5: Download wheel packages ---
-echo -e "${GREEN}[5/7] Downloading wheel packages for ${TARGET_ARCH}...${NC}"
+# --- Step 5: Download wheel packages for both architectures ---
+echo -e "${GREEN}[5/7] Downloading wheel packages for x86_64 and aarch64...${NC}"
 mkdir -p "$WHEELS_DIR"
 
-# Build --platform flags for pip download
-PLATFORM_FLAGS=()
-for p in "${PIP_PLATFORMS[@]}"; do
-    PLATFORM_FLAGS+=("--platform" "$p")
-done
+# Helper function to build --platform flags and download
+download_wheels_for_arch() {
+    local arch_name="$1"
+    shift
+    local platforms=("$@")
+    local flags=()
+    for p in "${platforms[@]}"; do
+        flags+=("--platform" "$p")
+    done
 
-# First pass: download binary wheels for target platform (all manylinux variants)
-"${VENV_PACKAGING_DIR}/bin/pip" download \
-    -r "${ROOT_DIR}/requirements.txt" \
-    "${PLATFORM_FLAGS[@]}" \
-    --python-version "$PYTHON_VERSION" \
-    --only-binary=:all: \
-    --dest "$WHEELS_DIR" \
-    2>&1 | sed 's/^/  /'
+    echo -e "  ${YELLOW}Downloading binary wheels for ${arch_name}...${NC}"
+    "${VENV_PACKAGING_DIR}/bin/pip" download \
+        -r "${ROOT_DIR}/requirements.txt" \
+        "${flags[@]}" \
+        --python-version "$PYTHON_VERSION" \
+        --only-binary=:all: \
+        --dest "$WHEELS_DIR" \
+        2>&1 | sed 's/^/  /' || true
+}
 
-# Second pass: download pure-Python packages (platform 'any')
+# Download binary wheels for x86_64
+download_wheels_for_arch "x86_64" "${PIP_PLATFORMS_X86_64[@]}"
+
+# Download binary wheels for aarch64
+download_wheels_for_arch "aarch64" "${PIP_PLATFORMS_AARCH64[@]}"
+
+# Download pure-Python packages (platform 'any', shared by both architectures)
+echo -e "  ${YELLOW}Downloading pure-Python wheels (platform any)...${NC}"
 "${VENV_PACKAGING_DIR}/bin/pip" download \
     -r "${ROOT_DIR}/requirements.txt" \
     --platform any \
@@ -197,24 +200,36 @@ done
     --dest "$WHEELS_DIR" \
     2>&1 | sed 's/^/  /' || true
 
-# Verify wheels were downloaded
+# Verify wheels were downloaded for both architectures
 WHEEL_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | wc -l)
+X86_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | grep -i "x86_64" | wc -l)
+AARCH64_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | grep -i "aarch64" | wc -l)
 if [ "$WHEEL_COUNT" -eq 0 ]; then
     echo -e "${RED}Error: No wheel packages downloaded. Check network and platform settings.${NC}"
     exit 1
 fi
-echo "  Downloaded ${WHEEL_COUNT} wheel packages."
+echo "  Downloaded ${WHEEL_COUNT} wheel packages total."
+echo "    x86_64 wheels:   ${X86_COUNT}"
+echo "    aarch64 wheels:  ${AARCH64_COUNT}"
+if [ "$X86_COUNT" -eq 0 ] || [ "$AARCH64_COUNT" -eq 0 ]; then
+    echo -e "${YELLOW}  Warning: One architecture has no arch-specific wheels.${NC}"
+    echo -e "  Some packages may be pure-Python only (no arch-specific binary needed)."
+fi
 
 # --- Step 6: Generate README_OFFLINE.txt ---
 echo -e "${GREEN}[6/7] Generating README_OFFLINE.txt...${NC}"
 cat > "${BUILD_DIR}/README_OFFLINE.txt" <<EOF
 ==========================================================
  Registry Center v${VERSION} - Offline Deployment Package
- Target: linux/${TARGET_ARCH} | Python ${PYTHON_VERSION}
+ Target: linux/x86_64, aarch64 | Python ${PYTHON_VERSION}
 ==========================================================
 
+This package contains wheels for both x86_64 and aarch64 architectures.
+The setup script will auto-detect the current machine architecture and
+install the appropriate wheels.
+
 Prerequisites:
-  - Linux ${TARGET_ARCH}
+  - Linux x86_64 or aarch64
   - Python ${PYTHON_VERSION} (pre-installed)
   - No internet connection required
 
@@ -255,7 +270,7 @@ Directory Layout:
   etc/conf/         Configuration files
   etc/systemd/      Systemd service templates
   bin/              Operational scripts
-  wheels/           Pre-downloaded Python wheel packages
+  wheels/           Pre-downloaded Python wheel packages (x86_64 + aarch64)
   venv/             Virtual environment (created by setup_offline.sh)
   log/              Runtime logs
   run/              Runtime PID/socket files
