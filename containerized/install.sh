@@ -118,13 +118,22 @@ check_docker() {
 
 check_kubectl() {
     if command -v kubectl &> /dev/null; then
-        local version=$(kubectl version --client --short 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)
-        local major=$(echo "$version" | cut -d. -f1)
-        local minor=$(echo "$version" | cut -d. -f2)
+        local version
+        version=$(kubectl version --client -o json 2>/dev/null | grep -oP '"gitVersion":\s*"v\K[^"]+' | head -1)
+        if [ -z "$version" ]; then
+            version=$(kubectl version --client 2>/dev/null | grep -oP 'Client Version:.*?v\K[^\s]+' | head -1)
+        fi
         
-        if [ "$major" -lt 1 ] || ([ "$major" -eq 1 ] && [ "$minor" -lt 25 ]); then
-            log_error "kubectl version $version is too old (requires 1.25+)"
-            return 1
+        local major
+        local minor
+        major=$(echo "$version" | cut -d. -f1)
+        minor=$(echo "$version" | cut -d. -f2)
+        
+        if [ -n "$major" ] && [ -n "$minor" ]; then
+            if [ "$major" -lt 1 ] || ([ "$major" -eq 1 ] && [ "$minor" -lt 25 ]); then
+                log_error "kubectl version $version is too old (requires 1.25+)"
+                return 1
+            fi
         fi
         
         log_info "kubectl installed: $version"
@@ -379,6 +388,20 @@ derive_metallb_pool() {
 }
 
 configure_metallb() {
+    log_info "Waiting for MetalLB CRDs to be ready..."
+    local i
+    for i in $(seq 1 12); do
+        if kubectl get crd ipaddresspools.metallb.io &>/dev/null && \
+           kubectl get crd l2advertisements.metallb.io &>/dev/null; then
+            break
+        fi
+        if [ "$i" -eq 12 ]; then
+            log_error "MetalLB CRDs not ready after 60s"
+            return 1
+        fi
+        sleep 5
+    done
+    
     log_info "Creating MetalLB IPAddressPool and L2Advertisement..."
 
     kubectl apply -f - <<EOF
