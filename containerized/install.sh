@@ -391,8 +391,7 @@ configure_metallb() {
     log_info "Waiting for MetalLB CRDs to be ready..."
     local i
     for i in $(seq 1 12); do
-        if kubectl get crd ipaddresspools.metallb.io &>/dev/null && \
-           kubectl get crd l2advertisements.metallb.io &>/dev/null; then
+        if kubectl api-resources --api-group=metallb.io 2>/dev/null | grep -q "ipaddresspools"; then
             break
         fi
         if [ "$i" -eq 12 ]; then
@@ -402,10 +401,19 @@ configure_metallb() {
         sleep 5
     done
     
+    # Detect available API version
+    local api_version="metallb.io/v1beta1"
+    if kubectl api-resources --api-group=metallb.io 2>/dev/null | grep "ipaddresspools" | grep -q "v1alpha1"; then
+        api_version="metallb.io/v1alpha1"
+        log_info "Using MetalLB API version: v1alpha1"
+    else
+        log_info "Using MetalLB API version: v1beta1"
+    fi
+    
     log_info "Creating MetalLB IPAddressPool and L2Advertisement..."
 
     kubectl apply -f - <<EOF
-apiVersion: metallb.io/v1beta1
+apiVersion: ${api_version}
 kind: IPAddressPool
 metadata:
   name: openan-pool
@@ -414,7 +422,7 @@ spec:
   addresses:
   - ${METALLB_POOL}
 ---
-apiVersion: metallb.io/v1beta1
+apiVersion: ${api_version}
 kind: L2Advertisement
 metadata:
   name: openan-l2
@@ -426,6 +434,8 @@ EOF
 
     if [ $? -ne 0 ]; then
         log_error "Failed to create MetalLB configuration"
+        log_info "Available MetalLB API resources:"
+        kubectl api-resources --api-group=metallb.io 2>/dev/null
         return 1
     fi
     log_info "MetalLB configuration applied"
