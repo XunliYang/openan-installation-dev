@@ -31,6 +31,7 @@ The script will guide you through an interactive setup:
    - kubectl (auto-install)
    - Helm (auto-install)
    - Nginx Ingress Controller (auto-install)
+   - MetalLB LoadBalancer (auto-install on bare-metal, skipped on cloud)
 
 2. **[2/5] Component Selection** - Choose what to deploy:
    - All components (default): Registry Center + Orchestration Center + Workflow Designer
@@ -82,54 +83,45 @@ kubectl -n openan get ingress
 
 ## Step 3: Access Platform
 
-### Configure Hosts
+### Get Access URL
 
-First, check the Ingress Controller service type and get its IP:
+The setup script automatically detects or configures a LoadBalancer IP. After deployment, get the access URL:
 
 ```bash
-# Check service type
-kubectl get svc -n ingress-nginx ingress-nginx-controller
-
-# If TYPE is LoadBalancer, get external IP:
+# Get the LoadBalancer IP
 INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
-# If TYPE is NodePort or external IP is empty, use node IP:
-if [ -z "$INGRESS_IP" ]; then
-    INGRESS_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-fi
-
-echo "Ingress IP: $INGRESS_IP"
+echo "Access URL: http://$INGRESS_IP/"
 ```
 
-Then add the Ingress host to your `/etc/hosts` file:
-- windows: `C:\Windows\System32\drivers\etc\hosts`
-- macOS/Linux: `/etc/hosts`
+If the LoadBalancer IP is empty (e.g., on cloud environments without MetalLB), use the node IP:
 
 ```bash
-echo "$INGRESS_IP  openan.local" | sudo tee -a /etc/hosts
+INGRESS_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+echo "Access URL: http://$INGRESS_IP:<nodeport>/"
 ```
 
 ### Access Services
 
 | Service | URL |
 |---------|-----|
-| **Workflow Designer** (Frontend) | `http://openan.local/` |
-| **Registry API** | `http://openan.local/registry/rest/v1/registry-center/agent-cards` |
-| **Orchestration API** | `http://openan.local/api/orchestrate/rest/v1/orchestrate/agent-cards` |
+| **Workflow Designer** (Frontend) | `http://<INGRESS_IP>/` |
+| **Registry API** | `http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards` |
+| **Orchestration API** | `http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards` |
 
 ### Test APIs
 
 ```bash
 # Test Registry API
-curl http://openan.local/registry/rest/v1/registry-center/agent-cards
+curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards
 
 # Test Orchestration API
-curl http://openan.local/api/orchestrate/rest/v1/orchestrate/agent-cards
+curl http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards
 ```
 
-### Access via NodePort (Alternative)
+### Access via NodePort (Fallback)
 
-If Ingress is not available, you can access the frontend via NodePort:
+If LoadBalancer is not available (MetalLB installation failed or not supported), you can access the frontend via NodePort:
 
 ```bash
 # Get NodePort
@@ -141,14 +133,6 @@ NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}
 # Access frontend
 echo "http://$NODE_IP:$NODE_PORT"
 ```
-
-**Configure Nginx Gateway URL:**
-
-When using NodePort access, you need to configure the frontend to connect to the backend services:
-
-* In frontend settings, set Nginx Gateway URL to: http://$NODE_IP:$NODE_PORT
-
-Note: The Nginx Gateway URL should be the same as the frontend access URL, as nginx will proxy the API requests.
 
 ## Update Configuration
 

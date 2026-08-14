@@ -285,6 +285,183 @@ verify_installation() {
     return 1
 }
 
+# ===== LoadBalancer Detection & MetalLB =====
+INGRESS_IP=""
+LB_STATUS=""
+
+check_loadbalancer() {
+    local svc_type
+    svc_type=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+        -o jsonpath='{.spec.type}' 2>/dev/null)
+
+    if [ "$svc_type" = "LoadBalancer" ]; then
+        local ip
+        ip=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+        if [ -n "$ip" ]; then
+            INGRESS_IP="$ip"
+            LB_STATUS="Existing LB detected"
+            log_info "LoadBalancer IP already assigned: $INGRESS_IP"
+            return 0
+        else
+            log_info "Ingress Controller is LoadBalancer but no IP assigned yet"
+            return 1
+        fi
+    elif [ "$svc_type" = "NodePort" ]; then
+        log_info "Ingress Controller is NodePort, will switch to LoadBalancer"
+        return 1
+    else
+        log_info "Ingress Controller Service type: $svc_type"
+        return 1
+    fi
+}
+
+install_metallb() {
+    if kubectl get namespace metallb-system &>/dev/null; then
+        log_info "MetalLB already installed (metallb-system namespace exists)"
+    else
+        log_info "Installing MetalLB..."
+        helm repo add metallb https://metallb.github.io/metallb 2>/dev/null
+        helm repo update 2>/dev/null
+        if ! helm install metallb metallb/metallb -n metallb-system --create-namespace; then
+            log_error "Failed to install MetalLB"
+            return 1
+        fi
+    fi
+
+    log_info "Waiting for MetalLB controller to be ready..."
+    if ! kubectl wait --namespace metallb-system \
+        --for=condition=ready pod \
+        --selector=app.kubernetes.io/component=controller \
+        --timeout=120s 2>/dev/null; then
+        log_error "MetalLB controller not ready after 120s"
+        return 1
+    fi
+    log_info "MetalLB controller ready"
+    return 0
+}
+
+derive_metallb_pool() {
+    local node_ip
+    node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+
+    if [ -z "$node_ip" ]; then
+        log_error "Cannot detect node IP for MetalLB pool"
+        return 1
+    fi
+
+    log_info "Detected node IP: $node_ip"
+
+    local prefix
+    prefix=$(echo "$node_ip" | cut -d. -f1-3)
+
+    local pool_start="${prefix}.200"
+    local pool_end="${prefix}.250"
+
+    local all_node_ips
+    all_node_ips=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+
+    local excluded=""
+    for ip in $all_node_ips; do
+        local ip_prefix
+        ip_prefix=$(echo "$ip" | cut -d. -f4)
+        if [ "$ip_prefix" -ge 200 ] && [ "$ip_prefix" -le 250 ] 2>/dev/null; then
+            excluded="$excluded $ip"
+        fi
+    done
+
+    if [ -n "$excluded" ]; then
+        log_warn "Node IPs in pool range (will be excluded by MetalLB):$excluded"
+    fi
+
+    METALLB_POOL="${pool_start}-${pool_end}"
+    log_info "MetalLB IP pool: $METALLB_POOL"
+}
+
+configure_metallb() {
+    log_info "Creating MetalLB IPAddressPool and L2Advertisement..."
+
+    kubectl apply -f - <<EOF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openan-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - ${METALLB_POOL}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: openan-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - openan-pool
+EOF
+
+    if [ $? -ne 0 ]; then
+        log_error "Failed to create MetalLB configuration"
+        return 1
+    fi
+    log_info "MetalLB configuration applied"
+    return 0
+}
+
+wait_for_ingress_ip() {
+    log_info "Waiting for LoadBalancer IP assignment..."
+    local i
+    for i in $(seq 1 12); do
+        INGRESS_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+        if [ -n "$INGRESS_IP" ]; then
+            LB_STATUS="MetalLB installed"
+            log_info "LoadBalancer IP assigned: $INGRESS_IP"
+            return 0
+        fi
+        sleep 5
+    done
+
+    log_error "Timed out waiting for LoadBalancer IP (60s)"
+    log_info "Check MetalLB status: kubectl get pods -n metallb-system"
+    log_info "Check Service: kubectl get svc -n ingress-nginx ingress-nginx-controller"
+    return 1
+}
+
+setup_loadbalancer() {
+    if check_loadbalancer; then
+        return 0
+    fi
+
+    if ! install_metallb; then
+        return 1
+    fi
+
+    if ! derive_metallb_pool; then
+        return 1
+    fi
+
+    if ! configure_metallb; then
+        return 1
+    fi
+
+    local svc_type
+    svc_type=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+        -o jsonpath='{.spec.type}' 2>/dev/null)
+    if [ "$svc_type" != "LoadBalancer" ]; then
+        log_info "Switching Ingress Controller Service to LoadBalancer..."
+        kubectl patch svc ingress-nginx-controller -n ingress-nginx \
+            -p '{"spec":{"type":"LoadBalancer"}}'
+    fi
+
+    if ! wait_for_ingress_ip; then
+        return 1
+    fi
+
+    return 0
+}
+
 # ===== Main Setup Flow =====
 echo ""
 echo "=========================================="
@@ -293,7 +470,7 @@ echo "=========================================="
 echo ""
 
 # Step 1: Environment Check
-log_step "[1/4] Checking prerequisites..."
+log_step "[1/5] Checking prerequisites and LoadBalancer..."
 echo ""
 
 MISSING_DEPS=()
@@ -321,6 +498,13 @@ fi
 # Check Ingress Controller (requires kubectl and cluster)
 if command -v kubectl &> /dev/null && kubectl cluster-info &> /dev/null; then
     check_ingress_controller || MISSING_DEPS+=("ingress-nginx")
+fi
+
+# Check and setup LoadBalancer (requires kubectl, cluster, and ingress controller)
+if command -v kubectl &> /dev/null && kubectl cluster-info &> /dev/null; then
+    if kubectl get svc -n ingress-nginx ingress-nginx-controller &>/dev/null; then
+        setup_loadbalancer || log_warn "LoadBalancer setup incomplete, will use default ingress host"
+    fi
 fi
 
 # Install missing dependencies
@@ -486,6 +670,14 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
     echo ""
     echo "  Agent Examples Server: $CONFIG_START_AGENTS_SERVER"
 fi
+
+if [ -n "$LB_STATUS" ]; then
+    echo ""
+    echo "  LoadBalancer:"
+    echo "    Status: $LB_STATUS"
+    echo "    IP: ${INGRESS_IP:-Pending}"
+fi
+
 echo ""
 echo "=========================================="
 echo ""
@@ -554,7 +746,11 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
 fi
 
 HELM_ARGS="$HELM_ARGS --set postgresql.password=$CONFIG_DB_PASSWORD"
-HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
+if [ -n "$INGRESS_IP" ]; then
+    HELM_ARGS="$HELM_ARGS --set ingress.host=$INGRESS_IP"
+else
+    HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
+fi
 
 # Check if default StorageClass exists
 if kubectl get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null | grep -q .; then
@@ -628,14 +824,17 @@ echo "=========================================="
 echo "  Setup Complete!"
 echo "=========================================="
 echo ""
+ACCESS_HOST="${INGRESS_IP:-$CONFIG_INGRESS_HOST}"
 echo "  Access the platform:"
-echo "    - Workflow Designer: http://$CONFIG_INGRESS_HOST/"
-echo "    - Registry API:      http://$CONFIG_INGRESS_HOST/registry/rest/v1/registry-center/agent-cards"
-echo "    - Orchestration API: http://$CONFIG_INGRESS_HOST/api/orchestrate/rest/v1/orchestrate/agent-cards"
+echo "    - Workflow Designer: http://$ACCESS_HOST/"
+echo "    - Registry API:      http://$ACCESS_HOST/registry/rest/v1/registry-center/agent-cards"
+echo "    - Orchestration API: http://$ACCESS_HOST/api/orchestrate/rest/v1/orchestrate/agent-cards"
 echo ""
-echo "  Add to /etc/hosts:"
-echo "    <ingress-ip>  $CONFIG_INGRESS_HOST"
-echo ""
+if [ -z "$INGRESS_IP" ]; then
+    echo "  Add to /etc/hosts:"
+    echo "    <ingress-ip>  $CONFIG_INGRESS_HOST"
+    echo ""
+fi
 echo "  Check status:"
 echo "    kubectl -n $CONFIG_K8S_NAMESPACE get pods"
 echo "    kubectl -n $CONFIG_K8S_NAMESPACE get ingress"
