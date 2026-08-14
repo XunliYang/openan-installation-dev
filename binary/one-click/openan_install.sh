@@ -1065,14 +1065,11 @@ echo " Step 3.5: Configuring LLM & registry URL"
 echo "=========================================="
 
 # --- LLM Configuration ---
-# Default values (user can override by typing a different value)
-DEFAULT_LLM_MODEL="qwen3.6-flash"
-DEFAULT_LLM_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+# No default values — user must provide their own model and URL.
+DEFAULT_LLM_MODEL=""
+DEFAULT_LLM_URL=""
 
 echo "[INPUT] LLM configuration is required for the chat model."
-echo "        Common providers:"
-echo "          Zhipu GLM:   model=glm-5.1      url=https://open.bigmodel.cn/api/paas/v4/chat/completions"
-echo "          Aliyun Qwen: model=qwen3.6-flash url=https://dashscope.aliyuncs.com/compatible-mode/v1"
 echo ""
 echo "  You can skip this step — a ready-to-run bash command will be"
 echo "  provided for you to configure the LLM later."
@@ -1148,15 +1145,47 @@ validate_llm() {
     esac
 }
 
+# ---------------------------------------------------------------------------
+# Function: read_masked — read user input with asterisk masking.
+# Usage: read_masked "Prompt: " VAR_NAME
+# Reads from /dev/tty, echoes '*' for each character typed.
+# Supports backspace. Press Enter to submit.
+# ---------------------------------------------------------------------------
+read_masked() {
+    local prompt="$1"
+    local var_name="$2"
+    local char value=""
+
+    printf '%s' "${prompt}"
+    while IFS= read -rs -n1 char 2>/dev/null; do
+        # Enter / newline — end input
+        if [[ -z "${char}" ]]; then
+            break
+        fi
+        # Backspace (ASCII 0x7F) or Ctrl-H (0x08)
+        if [[ "${char}" == $'\177' || "${char}" == $'\010' ]]; then
+            if [[ -n "${value}" ]]; then
+                value="${value%?}"
+                printf '\b \b'
+            fi
+            continue
+        fi
+        value+="${char}"
+        printf '*'
+    done < /dev/tty
+    printf '\n'
+    printf -v "${var_name}" '%s' "${value}"
+}
+
 if [ "${LLM_SKIPPED}" = "false" ]; then
 # Read from /dev/tty to ensure we get user input even if stdin is redirected
-read -r -p "        Enter LLM model name [${DEFAULT_LLM_MODEL}]: " LLM_MODEL < /dev/tty || LLM_MODEL=""
+read -r -p "        Enter LLM model name: " LLM_MODEL < /dev/tty || LLM_MODEL=""
 LLM_MODEL="${LLM_MODEL:-${DEFAULT_LLM_MODEL}}"
 
-read -r -p "        Enter LLM API URL [${DEFAULT_LLM_URL}]: " LLM_URL < /dev/tty || LLM_URL=""
+read -r -p "        Enter LLM API URL: " LLM_URL < /dev/tty || LLM_URL=""
 LLM_URL="${LLM_URL:-${DEFAULT_LLM_URL}}"
 
-read -r -p "        Enter your API key: " LLM_API_KEY < /dev/tty || LLM_API_KEY=""
+read_masked "        Enter your API key: " LLM_API_KEY
 
 # Validate LLM configuration; retry until valid or user skips
 while true; do
@@ -1188,7 +1217,7 @@ while true; do
     fi
     LLM_URL="${NEW_URL:-${LLM_URL}}"
 
-    read -r -p "        API key [***]: " NEW_KEY < /dev/tty || NEW_KEY=""
+    read_masked "        API key [***]: " NEW_KEY
     if [ "${NEW_KEY}" = "skip" ]; then
         echo "  [WARN] Validation skipped. The configuration may not work correctly."
         break
@@ -1253,8 +1282,8 @@ echo "  Or set LLM_API_KEY env var (avoids key in shell history):"
 echo "  LLM_API_KEY=your-key ./configure_llm.sh --model <model> --url <url>"
 echo ""
 echo "  Options:"
-echo "    --model <name>       LLM model name (default: qwen3.6-flash)"
-echo "    --url <url>          LLM API URL (default: https://dashscope.aliyuncs.com/compatible-mode/v1)"
+echo "    --model <name>       LLM model name"
+echo "    --url <url>          LLM API URL"
 echo "    --api-key <key>      API key (or LLM_API_KEY env var)"
 echo "    --project <target>   registry | orchestration | all (default: all)"
 echo "    --validate           Validate API connection (default)"
