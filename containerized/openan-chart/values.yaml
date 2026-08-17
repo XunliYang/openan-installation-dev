@@ -60,7 +60,7 @@ registry:
   replicas: 2
   image:
     repository: ghcr.io/xunliyang/registry-center
-    tag: latest
+    tag: v1.0.0
     pullPolicy: Always
   port: 5000
   # LLM configuration for registry-center
@@ -130,8 +130,8 @@ orchestration:
   enabled: true
   replicas: 1
   image:
-    repository: leoyy6/orchestration-center
-    tag: V1.0.0
+    repository: ghcr.io/xunliyang/orchestration-center
+    tag: v1.0.0
     pullPolicy: Always
   port: 5001
   # Registry Center URL (auto-discovered if registry.enabled=true)
@@ -187,8 +187,8 @@ frontend:
   enabled: true
   replicas: 2
   image:
-    repository: leoyy6/workflow-designer
-    tag: V1.0.0
+    repository: ghcr.io/xunliyang/workflow-designer
+    tag: v1.0.0
     pullPolicy: Always
   port: 80
   nodePort: 30191
