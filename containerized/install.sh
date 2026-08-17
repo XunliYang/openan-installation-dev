@@ -618,17 +618,12 @@ log_prompt "Components:"
 echo "  1. All components (Registry Center + Orchestration Center + Workflow Designer)"
 echo "  2. Registry Center only"
 echo "  3. Orchestration Center + Workflow Designer only"
-echo "  4. Custom selection"
 read -r choice
 
 case "$choice" in
     1) CONFIG_REGISTRY=true; CONFIG_ORCHESTRATION=true ;;
     2) CONFIG_REGISTRY=true; CONFIG_ORCHESTRATION=false ;;
     3) CONFIG_REGISTRY=false; CONFIG_ORCHESTRATION=true ;;
-    4)
-        CONFIG_REGISTRY=$(ask_yes_no "Deploy Registry Center?" "yes") && CONFIG_REGISTRY=true || CONFIG_REGISTRY=false
-        CONFIG_ORCHESTRATION=$(ask_yes_no "Deploy Orchestration Center?" "yes") && CONFIG_ORCHESTRATION=true || CONFIG_ORCHESTRATION=false
-        ;;
     *) CONFIG_REGISTRY=true; CONFIG_ORCHESTRATION=true ;;
 esac
 
@@ -776,10 +771,9 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
 fi
 
 HELM_ARGS="$HELM_ARGS --set postgresql.password=$CONFIG_DB_PASSWORD"
+HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
 if [ -n "$INGRESS_IP" ]; then
-    log_info "Using LoadBalancer IP: $INGRESS_IP (Ingress will use path-based routing without host)"
-else
-    HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
+    log_info "Using LoadBalancer IP: $INGRESS_IP"
 fi
 
 # Check if default StorageClass exists
@@ -819,10 +813,10 @@ if [ "$CONFIG_ORCHESTRATION" = true ] && [ "$CONFIG_START_AGENTS_SERVER" = true 
     echo ""
     log_step "Starting Agent Examples Server..."
     
-    log_info "Waiting for Orchestration Center to be ready..."
+    log_info "Waiting for Registry Center to be ready..."
     
-    # Wait for orchestration-center pod to be running
-    kubectl wait --for=condition=ready pod -l app=orchestration-center -n "$CONFIG_K8S_NAMESPACE" --timeout=300s
+    # Wait for registry-center pod to be running
+    kubectl wait --for=condition=ready pod -l app=registry-center -n "$CONFIG_K8S_NAMESPACE" --timeout=300s
     
     # Get the first orchestration-center pod name
     ORCH_POD=$(kubectl get pods -l app=orchestration-center -n "$CONFIG_K8S_NAMESPACE" -o jsonpath='{.items[0].metadata.name}')
@@ -854,17 +848,16 @@ echo "=========================================="
 echo "  Setup Complete!"
 echo "=========================================="
 echo ""
-ACCESS_HOST="${INGRESS_IP:-$CONFIG_INGRESS_HOST}"
+ACCESS_HOST="$CONFIG_INGRESS_HOST"
+INGRESS_DISPLAY_IP="${INGRESS_IP:-<ingress-ip>}"
 echo "  Access the platform:"
 echo "    - Workflow Designer: http://$ACCESS_HOST/"
 echo "    - Registry API:      http://$ACCESS_HOST/registry/rest/v1/registry-center/agent-cards"
 echo "    - Orchestration API: http://$ACCESS_HOST/api/orchestrate/rest/v1/orchestrate/agent-cards"
 echo ""
-if [ -z "$INGRESS_IP" ]; then
-    echo "  Add to /etc/hosts:"
-    echo "    <ingress-ip>  $CONFIG_INGRESS_HOST"
-    echo ""
-fi
+echo "  Add to /etc/hosts:"
+echo "    $INGRESS_DISPLAY_IP  $CONFIG_INGRESS_HOST"
+echo ""
 echo "  Check status:"
 echo "    kubectl -n $CONFIG_K8S_NAMESPACE get pods"
 echo "    kubectl -n $CONFIG_K8S_NAMESPACE get ingress"
