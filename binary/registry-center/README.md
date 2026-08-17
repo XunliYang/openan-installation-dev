@@ -14,8 +14,8 @@
 
 | 文件 | 说明 |
 |------|------|
-| `package_offline.sh` | 在**联网机器**上运行，构建自包含的离线部署包 |
-| `setup_offline.sh` | 在**离线机器**上运行，创建虚拟环境、安装依赖、配置服务 |
+| `pack_reg.sh` | 在**联网机器**上运行，构建自包含的离线部署包 |
+| `install_reg.sh` | 在**离线机器**上运行，创建虚拟环境、安装依赖、配置服务 |
 
 ### 部署流程
 
@@ -23,8 +23,7 @@
 ┌─────────────────┐     tar.gz      ┌─────────────────┐
 │  联网机器 (Online) │ ──────────────▶ │  离线机器 (Air-gapped) │
 │                  │   USB / SCP     │                  │
-│  package_offline │                 │  setup_offline   │
-│  .sh             │                 │  .sh             │
+│  pack_reg.sh     │                 │  install_reg.sh  │
 └─────────────────┘                  └─────────────────┘
 ```
 
@@ -32,10 +31,10 @@
 
 ```bash
 # 前提条件：Python 3.12+、互联网连接
-./bin/package_offline.sh
+./bin/pack_reg.sh
 
 # 指定版本号和输出目录
-./bin/package_offline.sh --version=1.0.0 --output=dist
+./bin/pack_reg.sh --version=1.0.0 --output=dist
 ```
 
 支持的参数：
@@ -66,13 +65,13 @@ tar -xzf registry-center-1.0.0-linux.tar.gz
 cd registry-center-1.0.0-linux
 
 # 2. 运行安装脚本（推荐用 source 激活 venv）
-source bin/setup_offline.sh
+source bin/install_reg.sh
 
 # 跳过交互式配置
-source bin/setup_offline.sh --skip-init
+source bin/install_reg.sh --skip-init
 
 # 指定 Python 解释器
-source bin/setup_offline.sh --python=python3.12
+source bin/install_reg.sh --python=python3.12
 
 # 3. 启动服务
 bin/start.sh
@@ -81,7 +80,7 @@ bin/start.sh
 bin/stop.sh
 ```
 
-`setup_offline.sh` 支持的参数：
+`install_reg.sh` 支持的参数：
 
 | 参数 | 说明 |
 |------|------|
@@ -97,7 +96,7 @@ bin/stop.sh
 4. 从本地 wheels 安装依赖（无需联网）
 5. 运行交互式配置向导（可跳过）
 
-> **注意**：使用 `source` 执行脚本可在当前 shell 中激活虚拟环境。直接执行（`./bin/setup_offline.sh`）则不会激活，需手动运行 `source venv/bin/activate`。
+> **注意**：使用 `source` 执行脚本可在当前 shell 中激活虚拟环境。直接执行（`./bin/install_reg.sh`）则不会激活，需手动运行 `source venv/bin/activate`。
 
 ### 离线机器前提条件
 
@@ -160,7 +159,7 @@ registry-center-1.0.0-linux/
 ├── etc/systemd/          systemd 服务模板
 ├── bin/                  运维脚本
 ├── wheels/               预下载的 Python wheel 包（x86_64 + aarch64）
-├── venv/                 虚拟环境（由 setup_offline.sh 创建）
+├── venv/                 虚拟环境（由 install_reg.sh 创建）
 ├── log/                  运行日志
 ├── run/                  PID/socket 文件
 ├── data/                 文件存储数据
@@ -176,7 +175,7 @@ A: 离线包包含 x86_64 和 aarch64 双架构 wheels。如果安装失败，�
 A: 运行 `./venv/bin/python -m agent_registry.init`，可随时重新配置 IP、端口、TLS、存储等。
 
 **Q: 虚拟环境损坏了怎么办？**
-A: 删除 `venv/` 目录后重新运行 `source bin/setup_offline.sh`，会从本地 wheels 重建。
+A: 删除 `venv/` 目录后重新运行 `source bin/install_reg.sh`，会从本地 wheels 重建。
 
 ---
 
@@ -190,8 +189,8 @@ This directory contains offline deployment scripts for the Registry Center. It u
 
 | File | Description |
 |------|-------------|
-| `package_offline.sh` | Run on the **online** machine to build a self-contained offline package |
-| `setup_offline.sh` | Run on the **offline** machine to create venv, install deps, and configure |
+| `pack_reg.sh` | Run on the **online** machine to build a self-contained offline package |
+| `install_reg.sh` | Run on the **offline** machine to create venv, install deps, and configure |
 
 ### Deployment Workflow
 
@@ -199,8 +198,7 @@ This directory contains offline deployment scripts for the Registry Center. It u
 ┌─────────────────┐     tar.gz      ┌─────────────────┐
 │  Online Machine  │ ──────────────▶ │  Air-gapped Machine │
 │                  │   USB / SCP     │                  │
-│  package_offline │                 │  setup_offline   │
-│  .sh             │                 │  .sh             │
+│  pack_reg.sh     │                 │  install_reg.sh  │
 └─────────────────┘                  └─────────────────┘
 ```
 
@@ -208,10 +206,10 @@ This directory contains offline deployment scripts for the Registry Center. It u
 
 ```bash
 # Prerequisites: Python 3.12+, internet access
-./bin/package_offline.sh
+./bin/pack_reg.sh
 
 # Specify version label and output directory
-./bin/package_offline.sh --version=1.0.0 --output=dist
+./bin/pack_reg.sh --version=1.0.0 --output=dist
 ```
 
 Supported options:
@@ -242,13 +240,13 @@ tar -xzf registry-center-1.0.0-linux.tar.gz
 cd registry-center-1.0.0-linux
 
 # 2. Run the setup script (use 'source' to activate venv in your shell)
-source bin/setup_offline.sh
+source bin/install_reg.sh
 
 # Skip interactive configuration
-source bin/setup_offline.sh --skip-init
+source bin/install_reg.sh --skip-init
 
 # Specify Python interpreter
-source bin/setup_offline.sh --python=python3.12
+source bin/install_reg.sh --python=python3.12
 
 # 3. Start the service
 bin/start.sh
@@ -257,7 +255,7 @@ bin/start.sh
 bin/stop.sh
 ```
 
-`setup_offline.sh` supported options:
+`install_reg.sh` supported options:
 
 | Option | Description |
 |--------|-------------|
@@ -273,7 +271,7 @@ Setup process:
 4. Install dependencies from local wheels (no internet needed)
 5. Run interactive configuration wizard (can be skipped)
 
-> **Note**: Use `source` to run the script so the venv is activated in your current shell. If you run it directly (`./bin/setup_offline.sh`), the venv will not be activated; you must manually run `source venv/bin/activate`.
+> **Note**: Use `source` to run the script so the venv is activated in your current shell. If you run it directly (`./bin/install_reg.sh`), the venv will not be activated; you must manually run `source venv/bin/activate`.
 
 ### Offline Machine Prerequisites
 
@@ -336,7 +334,7 @@ registry-center-1.0.0-linux/
 ├── etc/systemd/          Systemd service templates
 ├── bin/                  Operational scripts
 ├── wheels/               Pre-downloaded Python wheel packages (x86_64 + aarch64)
-├── venv/                 Virtual environment (created by setup_offline.sh)
+├── venv/                 Virtual environment (created by install_reg.sh)
 ├── log/                  Runtime logs
 ├── run/                  PID/socket files
 ├── data/                 File-based storage data
@@ -352,4 +350,4 @@ A: The offline package contains wheels for both x86_64 and aarch64. If installat
 A: Run `./venv/bin/python -m agent_registry.init` to reconfigure IP, port, TLS, storage, etc. at any time.
 
 **Q: The virtual environment is broken. What now?**
-A: Delete the `venv/` directory and re-run `source bin/setup_offline.sh`. It will rebuild from the local wheels.
+A: Delete the `venv/` directory and re-run `source bin/install_reg.sh`. It will rebuild from the local wheels.

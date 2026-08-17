@@ -14,8 +14,8 @@
 
 | 文件 | 说明 |
 |------|------|
-| `pack_offline_bundle.sh` | 在**联网机器**上运行，构建自包含的离线部署包 |
-| `install_offline.sh` | 在**离线机器**上运行，从离线包安装 Orchestration Center |
+| `pack_orc.sh` | 在**联网机器**上运行，构建自包含的离线部署包 |
+| `install_orc.sh` | 在**离线机器**上运行，从离线包安装 Orchestration Center |
 | `offline_config_guide.md` | 离线配置指南，详细说明各配置文件的编辑方法 |
 
 ### 部署流程
@@ -24,8 +24,7 @@
 ┌─────────────────┐     tar.gz      ┌─────────────────┐
 │  联网机器 (Online) │ ──────────────▶ │  离线机器 (Air-gapped) │
 │                  │   USB / SCP     │                  │
-│  pack_offline_   │                 │  install_offline │
-│  bundle.sh       │                 │  .sh             │
+│  pack_orc.sh     │                 │  install_orc.sh  │
 └─────────────────┘                  └─────────────────┘
 ```
 
@@ -33,7 +32,7 @@
 
 ```bash
 # 前提条件：Python 3.12+、Node.js 20.19+、npm、互联网连接
-./pack_offline_bundle.sh
+./pack_orc.sh
 ```
 
 生成的 tarball 包含：
@@ -52,14 +51,14 @@ tar xzf orchestration-center-offline-bundle.tar.gz
 cd orchestration-center-offline
 
 # 2. 运行安装脚本
-./bin/install_offline.sh
+./bin/install_orc.sh
 
 # 3. 编辑配置文件（参见 offline_config_guide.md）
 # 4. 启动服务
 bin/start.sh
 ```
 
-`install_offline.sh` 支持的参数：
+`install_orc.sh` 支持的参数：
 
 | 参数 | 说明 |
 |------|------|
@@ -122,8 +121,8 @@ This directory contains offline deployment scripts for the Orchestration Center.
 
 | File | Description |
 |------|-------------|
-| `pack_offline_bundle.sh` | Run on the **online** machine to build a self-contained offline bundle |
-| `install_offline.sh` | Run on the **offline** machine to install from the bundle |
+| `pack_orc.sh` | Run on the **online** machine to build a self-contained offline bundle |
+| `install_orc.sh` | Run on the **offline** machine to install from the bundle |
 | `offline_config_guide.md` | Detailed configuration guide for editing config files on the air-gapped machine |
 
 ### Deployment Workflow
@@ -132,8 +131,7 @@ This directory contains offline deployment scripts for the Orchestration Center.
 ┌─────────────────┐     tar.gz      ┌─────────────────┐
 │  Online Machine  │ ──────────────▶ │  Air-gapped Machine │
 │                  │   USB / SCP     │                  │
-│  pack_offline_   │                 │  install_offline │
-│  bundle.sh       │                 │  .sh             │
+│  pack_orc.sh     │                 │  install_orc.sh  │
 └─────────────────┘                  └─────────────────┘
 ```
 
@@ -141,7 +139,7 @@ This directory contains offline deployment scripts for the Orchestration Center.
 
 ```bash
 # Prerequisites: Python 3.12+, Node.js 20.19+, npm, internet access
-./pack_offline_bundle.sh
+./pack_orc.sh
 ```
 
 The resulting tarball contains:
@@ -160,14 +158,14 @@ tar xzf orchestration-center-offline-bundle.tar.gz
 cd orchestration-center-offline
 
 # 2. Run the installer
-./bin/install_offline.sh
+./bin/install_orc.sh
 
 # 3. Edit config files (see offline_config_guide.md)
 # 4. Start the service
 bin/start.sh
 ```
 
-`install_offline.sh` supported options:
+`install_orc.sh` supported options:
 
 | Option | Description |
 |--------|-------------|
