@@ -196,15 +196,16 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 
 #### Step 4：启动所有服务
 
-依次启动以下 5 个服务，每个服务启动前会自动清理被占用的端口：
+依次启动以下 4 个服务，每个服务启动前会自动清理被占用的端口：
 
 | 服务 | 端口 | 启动方式 |
 |------|------|---------|
 | registry-center | 5000 | `python -m agent_registry.start` |
 | orchestration-center 后端 | 5001 | `python -m orchestrate.start` |
-| orchestration-center 前端 | 3003 | `npm run dev` |
 | agents 示例服务 | 8080 | `python -m samples.start_agents_server` |
 | Nginx HTTPS 代理 | 443 | `systemctl start nginx` 或 `nginx` |
+
+> 前端在安装阶段由 `npm run build` 构建为静态文件，由 nginx 直接服务，不作为独立进程运行（见 ADR-014）。
 
 ---
 
@@ -372,7 +373,7 @@ Enter registry center URL [https://127.0.0.1:5000]:
 |------|-----------------|-------------------------------|
 | registry-center | http://127.0.0.1:5000 | https://[ip-of-vps]/registry/ |
 | orchestration 后端 | http://127.0.0.1:5001 | https://[ip-of-vps]/api/orchestrate/ |
-| orchestration 前端 | http://localhost:3003 | https://[ip-of-vps]/ |
+| 前端（静态文件） | — | https://[ip-of-vps]/ |
 | agents 示例服务 | http://127.0.0.1:8080 | — |
 | Nginx HTTPS 入口 | — | https://[ip-of-vps] |
 
@@ -434,7 +435,7 @@ sudo nginx -s stop
 
 | 步骤 | 操作 | 说明 |
 |------|------|------|
-| Step 1 | kill 进程 | 按端口查找并 kill OpenAN 进程（5000/5001/3003/8080/8902），智能识别避免误杀非 OpenAN 进程 |
+| Step 1 | kill 进程 | 按端口查找并 kill OpenAN 进程（5000/5001/8080/8899-8907/26335/26336），智能识别避免误杀非 OpenAN 进程 |
 | Step 2 | 停止 nginx | 三级回退：`systemctl stop` → `nginx -s stop` → `pkill nginx` |
 | Step 3 | 删除 nginx 配置 | 删除 `/etc/nginx/conf.d/openan.conf`、`/etc/nginx/ssl/` 证书、本地 `openan-nginx.conf` |
 | Step 4 | 删除项目目录 | 删除 `registry-center/` 和 `orchestration-center/` |
@@ -677,15 +678,16 @@ model url: https://open.bigmodel.cn/api/paas/v4/chat/completions
 
 #### Step 4: Start All Services
 
-Starts the following 5 services in order. Each service's port is automatically freed before startup:
+Starts the following 4 services in order. Each service's port is automatically freed before startup:
 
 | Service | Port | Start Method |
 |---------|------|-------------|
 | registry-center | 5000 | `python -m agent_registry.start` |
 | orchestration-center backend | 5001 | `python -m orchestrate.start` |
-| orchestration-center frontend | 3003 | `npm run dev` |
 | agents example server | 8080 | `python -m samples.start_agents_server` |
 | Nginx HTTPS proxy | 443 | `systemctl start nginx` or `nginx` |
+
+> The frontend is built as static assets via `npm run build` during installation and served directly by nginx, not as a separate process (see ADR-014).
 
 ---
 
@@ -853,7 +855,7 @@ After deployment, services are accessible at the following addresses:
 |---------|---------------------|---------------------------------------|
 | registry-center | http://127.0.0.1:5000 | https://[ip-of-vps]/registry/ |
 | orchestration backend | http://127.0.0.1:5001 | https://[ip-of-vps]/api/orchestrate/ |
-| orchestration frontend | http://localhost:3003 | https://[ip-of-vps]/ |
+| Frontend (static files) | — | https://[ip-of-vps]/ |
 | agents example server | http://127.0.0.1:8080 | — |
 | Nginx HTTPS entry | — | https://[ip-of-vps] |
 
@@ -913,7 +915,7 @@ and clean nginx configuration), use the `openan_uninstall.sh` script.
 
 | Step | Action | Description |
 |------|--------|-------------|
-| Step 1 | Kill processes | Find and kill OpenAN processes by port (5000/5001/3003/8080/8902), with smart identification to avoid killing non-OpenAN processes |
+| Step 1 | Kill processes | Find and kill OpenAN processes by port (5000/5001/8080/8899-8907/26335/26336), with smart identification to avoid killing non-OpenAN processes |
 | Step 2 | Stop nginx | Three-level fallback: `systemctl stop` → `nginx -s stop` → `pkill nginx` |
 | Step 3 | Remove nginx config | Delete `/etc/nginx/conf.d/openan.conf`, `/etc/nginx/ssl/` certificates, local `openan-nginx.conf` |
 | Step 4 | Remove project dirs | Delete `registry-center/` and `orchestration-center/` |

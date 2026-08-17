@@ -150,7 +150,7 @@ kill_pid() {
 # skipped on all ports because no single per-port pattern matches.
 # See ADR-008 for details.
 # =============================================================================
-OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"
+OPENAN_PATTERNS="agent_registry|orchestrate|samples"
 
 # =============================================================================
 # Port-to-label mapping for scan display and kill logging.
@@ -159,7 +159,6 @@ OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"
 #   port   label
 #   5000   registry-center
 #   5001   orchestration backend
-#   3003   orchestration frontend
 #   8080   agents examples server (management port)
 #   8899   sample agent — RAN Energy Saving Agent
 #   8900   sample agent — Energy Saving Intent Agent
@@ -179,7 +178,6 @@ OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"
 OPENAN_PORTS=(
     "5000:registry-center"
     "5001:orchestration backend"
-    "3003:orchestration frontend"
     "8080:agents examples server (management port)"
     "8899:sample agent — RAN Energy Saving Agent"
     "8900:sample agent — Energy Saving Intent Agent"
@@ -393,6 +391,15 @@ else
     echo "  [SKIP] ${NGINX_SSL_DIR}/cert.pem, key.pem — not found."
 fi
 
+# Remove static assets directory (frontend dist deployed by ADR-014)
+if [ -d /var/www/openan ]; then
+    echo "  [DEL] /var/www/openan"
+    run_sudo rm -rf /var/www/openan 2>/dev/null && echo "  [OK] Static assets removed." || \
+        echo "  [WARN] Failed to remove. Please delete manually: sudo rm -rf /var/www/openan"
+else
+    echo "  [SKIP] /var/www/openan — not found."
+fi
+
 # Remove local nginx config copy
 if [ -f "${NGINX_CONF_LOCAL}" ]; then
     echo "  [DEL] ${NGINX_CONF_LOCAL}"
@@ -439,11 +446,12 @@ echo " Uninstallation complete!"
 echo "=========================================="
 echo ""
 echo " Removed:"
-echo "   - OpenAN processes (ports 5000, 5001, 3003, 8080, 8899-8907, 26335, 26336)"
+echo "   - OpenAN processes (ports 5000, 5001, 8080, 8899-8907, 26335, 26336)"
 echo "   - nginx process (port 443)"
 echo "   - nginx config: ${NGINX_CONF_DEST}"
 echo "   - nginx SSL certs: ${NGINX_SSL_DIR}/cert.pem, key.pem"
 echo "   - local nginx config: ${NGINX_CONF_LOCAL}"
+echo "   - static assets: /var/www/openan/"
 echo "   - project dirs: registry-center/, orchestration-center/"
 echo ""
 echo " Preserved (environment tools):"

@@ -1048,10 +1048,24 @@ if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt -q
 fi
 
-# Install frontend dependencies
+# Install frontend dependencies and build static assets
+# npm run build produces dist/ which nginx serves directly (see ADR-014)
 echo "[NPM] Installing orchestration-center frontend dependencies..."
 cd "${ORCHESTRATION_DIR}/workflow-designer"
 npm install --force
+
+echo "[BUILD] Building frontend static assets..."
+npm run build > "${ORCHESTRATION_DIR}/frontend-build.log" 2>&1
+echo "  [OK] Frontend built to dist/"
+
+# Deploy static assets to system web directory (see ADR-014)
+# nginx (www-data) cannot traverse user home directory, so we copy dist/
+# to /var/www/openan/ with world-readable permissions.
+echo "[DEPLOY] Copying frontend assets to /var/www/openan/..."
+run_sudo mkdir -p /var/www/openan
+run_sudo cp -r "${ORCHESTRATION_DIR}/workflow-designer/dist/"* /var/www/openan/
+run_sudo chmod -R 755 /var/www/openan
+echo "  [OK] Static assets deployed to /var/www/openan/"
 
 cd "${ORCHESTRATION_DIR}"
 else
@@ -1221,14 +1235,10 @@ server {
     ssl_certificate /etc/nginx/ssl/cert.pem;
     ssl_certificate_key /etc/nginx/ssl/key.pem;
 
-    # Frontend (Vite dev server with WebSocket upgrade for HMR)
+    # Frontend (static files served from /var/www/openan, see ADR-014)
     location / {
-        proxy_pass http://127.0.0.1:3003;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        root /var/www/openan;
+        try_files $uri $uri/ /index.html;
     }
 
     # Orchestration backend API (trailing slash strips /api/orchestrate prefix)
@@ -1297,7 +1307,6 @@ echo "=========================================="
 # Initialize PIDs for dynamic summary
 REGISTRY_PID=""
 OC_BACKEND_PID=""
-FRONTEND_REAL_PID=""
 AGENTS_PID=""
 NGINX_PID=""
 
@@ -1336,49 +1345,6 @@ fi
 nohup python -m orchestrate.start > "${ORCHESTRATION_DIR}/backend.log" 2>&1 &
 OC_BACKEND_PID=$!
 echo "  PID: ${OC_BACKEND_PID}"
-fi
-
-# Start orchestration-center frontend (port 3003)
-if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-FRONTEND_PORT=3003
-free_port "${FRONTEND_PORT}"
-echo "[START] orchestration-center frontend (http://localhost:${FRONTEND_PORT})..."
-
-cd "${ORCHESTRATION_DIR}/workflow-designer"
-nohup npm run dev > "${ORCHESTRATION_DIR}/frontend.log" 2>&1 &
-OC_FRONTEND_PID=$!
-echo "  PID: ${OC_FRONTEND_PID}"
-
-# Wait and verify the frontend is actually listening
-# NOTE: ss -lntp requires root to see PIDs, so we detect the port with ss -lnt
-# (no -p) first, then try to grab the PID as best-effort extra info.
-FRONTEND_OK=false
-FRONTEND_REAL_PID="${OC_FRONTEND_PID}"
-echo "  [WAIT] Verifying frontend startup (up to 30s)..."
-for _ in $(seq 1 30); do
-    if ! kill -0 "${OC_FRONTEND_PID}" 2>/dev/null; then
-        echo "  [ERROR] Frontend process exited unexpectedly."
-        echo "          --- Last 20 lines of frontend.log ---"
-        tail -n 20 "${ORCHESTRATION_DIR}/frontend.log" 2>/dev/null | sed 's/^/          /'
-        break
-    fi
-    # Check if the port is listening (does NOT require root)
-    if ss -lnt 2>/dev/null | grep -q ":${FRONTEND_PORT}\b"; then
-        # Best-effort: try to grab the actual PID owning the port
-        # NOTE: || true prevents set -e from exiting when grep finds no match
-        _pid=$(ss -lntp 2>/dev/null | grep ":${FRONTEND_PORT}\b" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
-        [ -n "${_pid}" ] && FRONTEND_REAL_PID="${_pid}"
-        echo "  [OK] Frontend is listening on port ${FRONTEND_PORT} (PID: ${FRONTEND_REAL_PID})"
-        FRONTEND_OK=true
-        break
-    fi
-    sleep 1
-done
-if [ "${FRONTEND_OK}" = "false" ]; then
-    echo "  [WARN] Frontend may not have started on port ${FRONTEND_PORT}."
-    echo "         --- Last 20 lines of frontend.log ---"
-    tail -n 20 "${ORCHESTRATION_DIR}/frontend.log" 2>/dev/null | sed 's/^/         /'
-fi
 fi
 
 # Start agents examples server (provides sample agents for testing)
@@ -1439,10 +1405,6 @@ if [ -n "${OC_BACKEND_PID}" ]; then
     echo " orchestration backend:  http://127.0.0.1:5001  (PID: ${OC_BACKEND_PID})"
     STOP_PIDS="${STOP_PIDS} ${OC_BACKEND_PID}"
 fi
-if [ -n "${FRONTEND_REAL_PID}" ]; then
-    echo " orchestration frontend: https://${VPS_IP}  (PID: ${FRONTEND_REAL_PID})"
-    STOP_PIDS="${STOP_PIDS} ${FRONTEND_REAL_PID}"
-fi
 if [ -n "${AGENTS_PID}" ]; then
     echo " agents examples server: http://127.0.0.1:8080  (PID: ${AGENTS_PID})"
     STOP_PIDS="${STOP_PIDS} ${AGENTS_PID}"
@@ -1458,9 +1420,6 @@ if [ -n "${REGISTRY_PID}" ]; then
 fi
 if [ -n "${OC_BACKEND_PID}" ]; then
     echo "   ${ORCHESTRATION_DIR}/backend.log"
-fi
-if [ -n "${FRONTEND_REAL_PID}" ]; then
-    echo "   ${ORCHESTRATION_DIR}/frontend.log"
 fi
 if [ -n "${AGENTS_PID}" ]; then
     echo "   ${ORCHESTRATION_DIR}/agents-server.log"

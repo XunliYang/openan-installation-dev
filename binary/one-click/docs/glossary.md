@@ -125,17 +125,17 @@ nginx 二进制路径查找辅助函数。采用两级查找策略：
 ## VPS_IP
 
 Summary 输出段中用于显示远程访问 URL 的 VPS 网卡 IP 变量。通过 `hostname -I`
-获取第一个非回环 IP，失败时回退到 `localhost`。仅用于 frontend 和 nginx 两行的
+获取第一个非回环 IP，失败时回退到 `localhost`。仅用于 nginx 行的
 URL 显示，其余服务保持 `127.0.0.1`（因仅 `--reg` 模式无 nginx 代理，
 直接显示内网地址更准确）（见 ADR-004）。
 
 ## 远程访问入口 (Remote Access Entry Point)
 
 nginx 反向代理是 VPS 部署中唯一的远程访问入口。所有后端服务（registry-center、
-orchestration backend、frontend、agents server）均绑定在 `127.0.0.1`，外部无法
+orchestration backend、agents server）均绑定在 `127.0.0.1`，外部无法
 直连。nginx 监听 `0.0.0.0:443`，通过路径前缀代理到各服务：
-`/` → frontend、`/api/orchestrate/` → backend、`/registry/` → registry。
-agents server 无 nginx 代理，远程不可访问（见 ADR-004）。
+`/` → 前端静态文件（dist 目录）、`/api/orchestrate/` → backend、`/registry/` → registry。
+agents server 无 nginx 代理，远程不可访问（见 ADR-004、ADR-014）。
 
 ## hostname -I
 
@@ -312,7 +312,7 @@ registry-center 拿到 agent card（HTTP 200），但 card 中的 URL 指向的 
 ## free_port() 端口覆盖范围 (free_port Coverage)
 
 `openan_install.sh` 中的 `free_port()` 函数（lines 718-735）在启动服务前清理被占用的
-端口。自 ADR-009 起覆盖 16 个端口：5000、5001、3003、443、8080、**8899-8907、26335、
+端口。自 ADR-014 起覆盖 15 个端口：5000、5001、443、8080、**8899-8907、26335、
 26336**。ADR-008 新增了 8902 的清理（基于错误前提，已被 ADR-009 修正），ADR-009
 将范围扩展到全部 11 个 sample agent 端口。`free_port()` 采用无差别 kill（不检查
 cmdline），与卸载脚本的智能识别不同——安装场景中端口上的进程几乎都是 OpenAN
@@ -327,7 +327,7 @@ nginx 配置，保留环境工具（Python、Node.js、npm、nginx 二进制）�
 ## 智能进程识别 (Smart Process Identification)
 
 卸载脚本在 kill 端口上的进程前，检查进程命令行是否匹配**任意** OpenAN 已知模式
-（全局 pattern 集合：`agent_registry|orchestrate|vite|samples`）。匹配任意一个即 kill，
+（全局 pattern 集合：`agent_registry|orchestrate|samples`）。匹配任意一个即 kill，
 全部不匹配才打印 `[WARN]` 并跳过，避免误杀用户在相同端口上运行的非 OpenAN 服务。
 与安装脚本的 `free_port()` 无差别 kill 不同——卸载场景中用户可能已将端口挪作他用
 （见 ADR-007、ADR-008）。
@@ -358,7 +358,7 @@ nginx 配置，保留环境工具（Python、Node.js、npm、nginx 二进制）�
 ## 全局 Pattern 匹配 (Global Pattern Matching)
 
 ADR-008 引入的卸载脚本进程识别策略。定义全局 OpenAN pattern 集合
-（`OPENAN_PATTERNS="agent_registry|orchestrate|vite|samples"`），对每个端口上发现
+（`OPENAN_PATTERNS="agent_registry|orchestrate|samples"`），对每个端口上发现
 的进程，检查其 cmdline 是否匹配任意一个 pattern（`grep -qE`）。匹配任意一个即 kill，
 全部不匹配才跳过。替代了 ADR-007 的"每端口单一 pattern"设计，消除跨端口进程逃逸
 问题（见 ADR-008）。
@@ -374,7 +374,7 @@ pattern 检查和 WARN 日志。ADR-008 将 `find_pids_on_port` 的优先级改�
 
 ## 卸载端口覆盖范围 (Uninstall Port Coverage)
 
-`openan_uninstall.sh` 自 ADR-009 起覆盖 15 个端口：5000、5001、3003、8080、
+`openan_uninstall.sh` 自 ADR-014 起覆盖 14 个端口：5000、5001、8080、
 8899-8907、26335、26336。443 由 nginx 停止逻辑单独处理。
 `samples.start_agents_server` 是单进程多端口（12 个端口），在任意一个端口上发现并
 kill 即可终止全部端口监听。扩展端口范围确保该进程在所有端口上都能被发现
@@ -458,3 +458,39 @@ orchestration-center 自 ADR-011 起也从 pre-built venv 改为纯 wheel 策略
 （`FAIL_COUNT > 0`，仍 `exit 1`）区分。Summary 标题在此场景下从
 `LLM configuration complete` 改为 `LLM configuration skipped`。非交互模式不受影响
 （缺少参数时自动进入交互模式）。
+
+## 静态文件服务模式 (Static File Serving Mode)
+
+orchestration-center 前端的部署方式（ADR-014）。在安装阶段执行 `npm run build`
+将 Vue 源码编译为纯静态文件（HTML/JS/CSS），产出在 `workflow-designer/dist/`
+目录。nginx 通过 `root` 指令直接服务该目录，`location /` 不再 `proxy_pass`
+到 Vite dev server。与原先的 dev 模式（`npm run dev` 后台常驻 Vite 进程）
+相比：减少一个常驻进程、nginx 配置更简洁、首次加载更快，但失去 HMR 热更新
+能力（见 ADR-014）。
+
+## SPA 路由回退 (SPA Route Fallback)
+
+nginx 静态文件服务中的 `try_files` 指令配置（ADR-014）：
+`try_files $uri $uri/ /index.html`。workflow-designer 是 Vue 单页应用，
+前端路由如 `/workflow-designer/edit/123` 是客户端路由，磁盘上无对应文件。
+该指令让 nginx 在找不到匹配文件时回退到 `index.html`，由 Vue Router 接管
+路由。缺少此配置会导致刷新非根路径页面时返回 404（见 ADR-014）。
+
+## 构建时依赖 (Build-time Dependency)
+
+Node.js 在 ADR-014 后的角色变化。安装阶段需要 Node.js 执行 `npm install`
+和 `npm run build`，但安装完成后不再需要 Node.js 进程常驻运行（前端以
+静态文件形式由 nginx 服务）。与原先的"运行时依赖"（Vite dev server
+需要 Node.js 持续运行）不同。`resolve_node()` 仍在 Step 0 自动安装
+Node.js，但仅用于构建阶段（见 ADR-014）。
+
+## dist 目录 (dist Directory)
+
+`npm run build` 产出的前端静态文件目录，位于
+`orchestration-center/workflow-designer/dist/`。包含 `index.html`、
+`assets/`（编译后的 JS/CSS 包，文件名含内容哈希）等文件。安装时复制到
+`/var/www/openan/`（系统目录），nginx 配置中 `location /` 的 `root` 指令指向
+`/var/www/openan`。不直接指向项目内 dist 的原因是：nginx worker 进程以
+`www-data` 用户运行，无法穿越用户 home 目录（权限 750/700）读取 dist 文件，
+导致 Permission denied（500）。卸载时通过 `rm -rf /var/www/openan` 清理
+（见 ADR-014）。
