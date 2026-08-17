@@ -28,10 +28,7 @@ log_prompt(){ echo -e "${BLUE}[?]${NC} $1"; }
 # ===== Configuration =====
 CONFIG_REGISTRY=true
 CONFIG_ORCHESTRATION=true
-CONFIG_IMAGE_REGISTRY="docker.io"
-CONFIG_IMAGE_NAMESPACE="leoyy6"
 CONFIG_K8S_NAMESPACE="openan"
-CONFIG_TAG="v1.0.0"
 
 # LLM Configuration for Registry Center
 CONFIG_REGISTRY_CHAT_MODEL=""
@@ -733,9 +730,6 @@ fi
 
 # ===== Execute Setup =====
 
-log_step "Using pre-built images from $CONFIG_IMAGE_REGISTRY"
-
-# Deploy with Helm
 log_step "Deploying with Helm..."
 
 HELM_ARGS=""
@@ -751,9 +745,6 @@ else
 fi
 
 if [ "$CONFIG_REGISTRY" = true ]; then
-    HELM_ARGS="$HELM_ARGS --set registry.image.repository=$CONFIG_IMAGE_REGISTRY/$CONFIG_IMAGE_NAMESPACE/registry-center"
-    HELM_ARGS="$HELM_ARGS --set registry.image.tag=$CONFIG_TAG"
-    
     # Registry LLM Chat
     if [ -n "$CONFIG_REGISTRY_CHAT_MODEL" ]; then
         HELM_ARGS="$HELM_ARGS --set registry.llm.chat.model=$CONFIG_REGISTRY_CHAT_MODEL"
@@ -767,11 +758,6 @@ if [ "$CONFIG_REGISTRY" = true ]; then
 fi
 
 if [ "$CONFIG_ORCHESTRATION" = true ]; then
-    HELM_ARGS="$HELM_ARGS --set orchestration.image.repository=$CONFIG_IMAGE_REGISTRY/$CONFIG_IMAGE_NAMESPACE/orchestration-center"
-    HELM_ARGS="$HELM_ARGS --set orchestration.image.tag=$CONFIG_TAG"
-    HELM_ARGS="$HELM_ARGS --set frontend.image.repository=$CONFIG_IMAGE_REGISTRY/$CONFIG_IMAGE_NAMESPACE/workflow-designer"
-    HELM_ARGS="$HELM_ARGS --set frontend.image.tag=$CONFIG_TAG"
-    
     # External Registry URL (when not deploying registry locally)
     if [ "$CONFIG_REGISTRY" = false ] && [ -n "$CONFIG_REGISTRY_URL" ]; then
         HELM_ARGS="$HELM_ARGS --set orchestration.agentRegistryUrl=$CONFIG_REGISTRY_URL"
