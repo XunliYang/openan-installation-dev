@@ -18,7 +18,7 @@ The setup script will automatically install missing tools (Docker, kubectl, Helm
 ```bash
 # Clone the repository
 git clone https://github.com/project-openan/openan-installation.git
-cd openan-installation-dev/containerized
+cd openan-installation/containerized
 
 # Run the interactive installation script
 ./install.sh

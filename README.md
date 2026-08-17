@@ -6,11 +6,11 @@ System-level installation tooling for OpenAN, providing one-click binary install
 
 ```
 openan-installation/
-├── binary/                          # Binary deployment
+├── binary/                          # Binary installation
 │   ├── one-click/                   # One-click installation scripts
 │   ├── orchestration-center/        # Orchestration Center binaries
 │   └── registry-center/             # Registry Center binaries
-└── containerized/                   # Containerized deployment
+└── containerized/                   # Containerized installation
     ├── build/                       # Image build scripts
     ├── install.sh                   # Interactive installation tool
     ├── uninstall.sh                 # One-click uninstall script
@@ -25,7 +25,7 @@ openan-installation/
 Production-grade installation using Helm charts. Supports multi-node clusters, HPA auto-scaling, and TLS certificates.
 
 ```bash
-git clone https://github.com/XunliYang/openan-installation.git
+git clone https://github.com/project-openan/openan-installation.git
 cd openan-installation/containerized
 ./install.sh
 ```
@@ -39,17 +39,13 @@ cd openan-installation/containerized
 
 **Manual / System Admin Installation:**
 If you prefer to manually install the Helm chart, follow these steps:
-- Prerequisites: Ensure you have a Kubernetes cluster (v1.24+) and Helm installed.
-- Build your local images by running `containerized/build/build.sh` or pull from Docker Hub.
+- Prerequisites: Ensure you have a Kubernetes cluster (v1.25+) and Helm 3.10.0+ installed.
+- Build your local images by running `containerized/build/build.sh` or pull from ghcr.io.
 - Customize the Helm chart values in `containerized/openan-chart/values.yaml`, and then install the chart using Helm:
 ```bash
-helm install openan ./openan-chart -n openan --create-namespace -f values.yaml
+cd containerized
+helm install openan ./openan-chart -n openan --create-namespace
 ```
-
-**Documentation:**
-- [Quick Start](./containerized/QUICKSTART.md) - One-click installation guide
-- [Helm Chart](./containerized/openan-chart/README.md) - Helm configuration reference
-- [Image Build](./containerized/build/README.md) - Custom image building
 
 ### 2. One-Click Binary Installation
 
@@ -65,4 +61,45 @@ cd binary/one-click
 - Downloads and starts all services locally (PostgreSQL, Registry, Orchestration, Frontend)
 - Automatic dependency setup (Python venvs, Node.js)
 - Ready for installation in minutes
+
+## Uninstall
+
+### Containerized
+
+```bash
+cd containerized
+./uninstall.sh
+```
+
+Or manually:
+
+```bash
+helm uninstall openan -n openan
+kubectl delete namespace openan
+```
+
+### Binary
+
+```bash
+cd binary/one-click
+./openan_uninstall.sh
+```
+
+## Upgrade
+
+> **Note:** Upgrade functionality is currently under development and not yet available.
+
+For containerized deployments, upgrade will be supported via:
+
+```bash
+cd containerized
+helm upgrade openan ./openan-chart -n openan
+```
+
+## Documentation
+
+- [Quick Start](./containerized/QUICKSTART.md) - One-click installation guide
+- [Helm Chart](./containerized/openan-chart/README.md) - Helm configuration reference
+- [Image Build](./containerized/build/README.md) - Custom image building
+- [Binary Installation](./binary/one-click/README.md) - Binary installation details
 

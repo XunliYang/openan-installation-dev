@@ -1,406 +1,209 @@
 # OpenAN Platform Helm Chart
 
-OpenAN Platform Helm Chart for deploying the complete OpenAN platform on a Kubernetes cluster.
-
-## Deployment Method Comparison
-
-| Feature | Pure YAML | Helm Chart (this document) |
-|---------|-----------|---------------------------|
-| Use Case | Simple deployment, quick validation | Production environment, multi-config management |
-| Deploy Command | `kubectl apply -f k8s/` | `helm install openan ./openan-chart` |
-| Optional Components | Manually exclude files | `--set orchestration.enabled=false` |
-| Configuration | Edit YAML files directly | `values.yaml` + command-line overrides |
-| Multi-environment Support | Maintain multiple file sets | `values-dev.yaml` / `values-prod.yaml` |
-| Learning Curve | Low | Requires basic Helm knowledge |
-
-> For pure YAML deployment, please refer to [K8S Deployment Guide](../../k8s-deployment-guide.md).
+Helm Chart for deploying the OpenAN platform on Kubernetes.
 
 ## Components
 
-This Chart deploys the following components:
-
-| Component | Description | Default Port |
-|-----------|-------------|--------------|
-| **Registry Center** | Agent registration center, provides Agent Card registration, discovery, and semantic search | 5000 |
-| **Orchestration Center** | Workflow orchestration center, provides PSOP generation and workflow execution | 5001 |
-| **Workflow Designer** | Frontend workflow designer, provides visual workflow editing interface | 80 |
-| **PostgreSQL** | Shared database, stores registry_center and orchestration_center | 5432 |
+| Component | Description | Port |
+|-----------|-------------|------|
+| **Registry Center** | Agent Card registration, discovery, and semantic search | 5000 |
+| **Orchestration Center** | PSOP generation and workflow execution | 5001 |
+| **Workflow Designer** | Visual workflow editing frontend (Nginx) | 80 |
+| **PostgreSQL** | Shared database | 5432 |
 
 ## Prerequisites
 
 - Kubernetes 1.25+
 - Helm 3.10.0+
-- kubectl configured
-- Ingress Controller (Nginx) installed (for external access)
-- Container images pushed to an accessible registry (see [Image Build Guide](../build/README.md))
+- Ingress Controller (Nginx) for external access
 
 ## File Structure
 
 ```
 openan-chart/
-├── Chart.yaml                           # Chart metadata
-├── values.yaml                          # Default configuration
+├── Chart.yaml
+├── values.yaml
 └── templates/
-    ├── _helpers.tpl                     # Template functions
-    ├── namespace.yaml                   # openan namespace
-    ├── ingress.yaml                     # Unified entry point (frontend / orchestration / registry)
-    ├── NOTES.txt                        # Deployment notes
+    ├── _helpers.tpl
+    ├── ingress.yaml
+    ├── NOTES.txt
     ├── postgres/
-    │   ├── storage.yaml                 # StorageClass / PV (optional)
-    │   └── statefulset.yaml             # Shared PostgreSQL
+    │   ├── storage.yaml
+    │   └── statefulset.yaml
     ├── registry-center/
-    │   ├── secret.yaml                  # registry independent secret
-    │   ├── configmap.yaml               # registry configuration
-    │   ├── deployment.yaml
-    │   ├── service.yaml                 # port 5000
-    │   ├── tls-secret.yaml              # TLS certificate (auto mode)
-    │   └── signing-secret.yaml          # JWS signing certificate (auto mode)
-    ├── orchestration-center/
-    │   ├── secret.yaml                  # orchestration independent secret
     │   ├── configmap.yaml
     │   ├── deployment.yaml
-    │   ├── service.yaml                 # port 5001
+    │   ├── secret.yaml
+    │   ├── service.yaml
+    │   ├── tls-secret.yaml
+    │   └── signing-secret.yaml
+    ├── orchestration-center/
+    │   ├── configmap.yaml
+    │   ├── deployment.yaml
+    │   ├── secret.yaml
+    │   ├── service.yaml
     │   └── hpa.yaml
     └── workflow-designer/
-        ├── configmap.yaml             # nginx configuration
+        ├── configmap.yaml
         ├── deployment.yaml
-        ├── service.yaml                 # port 80
+        ├── service.yaml
         └── hpa.yaml
 ```
 
 ## Quick Start
 
-### 1. Add Helm Repository (if published)
+### Install
 
 ```bash
-helm repo add openan https://charts.openan.io
-helm repo update
-```
+# Default configuration from values.yaml
+helm install openan ./openan-chart -n openan --create-namespace
 
-### 2. Prepare Configuration
+# Custom configuration
+helm install openan ./openan-chart -n openan --create-namespace -f values-custom.yaml
 
-Create `values-custom.yaml`:
-
-```yaml
-# Database password
-postgresql:
-  password: "your-secure-password"
-
-# Registry Center LLM configuration
-registry:
-  llm:
-    chat:
-      apiKey: "sk-registry-chat-key"
-    embed:
-      apiKey: "sk-registry-embed-key"
-    rerank:
-      apiKey: "sk-registry-rerank-key"
-
-# Orchestration Center LLM configuration
-orchestration:
-  llm:
-    chat:
-      apiKey: "sk-orchestration-chat-key"
-  a2at:
-    apiKey: "sk-orchestration-a2at-key"
-
-# Ingress configuration
-ingress:
-  host: openan.your-domain.com
-  tls:
-    enabled: true
-    secretName: openan-tls
-```
-
-### 3. Install Chart
-
-```bash
-# Install with default configuration from values.yaml
-helm install openan . \
-  -n openan --create-namespace
-
-# Install with custom configuration file
-helm install openan . \
-  -n openan --create-namespace \
-  -f values-custom.yaml
-
-# Or use command-line overrides
-helm install openan . \
-  -n openan --create-namespace \
+# Command-line overrides
+helm install openan ./openan-chart -n openan --create-namespace \
   --set postgresql.password=your-password \
   --set registry.llm.chat.apiKey=sk-xxx \
   --set orchestration.llm.chat.apiKey=sk-yyy
 
-# Custom image registry (edit values.yaml or use --set)
-helm install openan . \
-  -n openan --create-namespace \
+# Custom image registry
+helm install openan ./openan-chart -n openan --create-namespace \
   --set registry.image.repository=harbor.example.com/openan/registry-center \
-  --set registry.image.tag=v1.0.0 \
   --set orchestration.image.repository=harbor.example.com/openan/orchestration-center \
-  --set orchestration.image.tag=v1.0.0 \
-  --set frontend.image.repository=harbor.example.com/openan/workflow-designer \
-  --set frontend.image.tag=v1.0.0
-
-# If namespace already exists and is not managed by Helm
-kubectl create namespace openan
-helm install openan . -n openan --set createNamespace=false
+  --set frontend.image.repository=harbor.example.com/openan/workflow-designer
 ```
 
-### 4. Configure LLM API Key (using external Secret)
-
-Create Secret:
+### Verify
 
 ```bash
-kubectl create secret generic openan-llm-keys \
-  --namespace openan \
-  --from-literal=registry-chat-key=sk-your-registry-key \
-  --from-literal=registry-embed-key=sk-your-embed-key \
-  --from-literal=registry-rerank-key=sk-your-rerank-key \
-  --from-literal=orchestration-chat-key=sk-your-orchestration-key \
-  --from-literal=orchestration-a2at-key=sk-your-a2at-key
-```
-
-Reference in `values-custom.yaml`:
-
-```yaml
-registry:
-  llm:
-    chat:
-      existingSecret: openan-llm-keys
-      existingSecretKey: registry-chat-key
-    embed:
-      existingSecret: openan-llm-keys
-      existingSecretKey: registry-embed-key
-    rerank:
-      existingSecret: openan-llm-keys
-      existingSecretKey: registry-rerank-key
-
-orchestration:
-  llm:
-    chat:
-      existingSecret: openan-llm-keys
-      existingSecretKey: orchestration-chat-key
-  a2at:
-    existingSecret: openan-llm-keys
-    existingSecretKey: orchestration-a2at-key
-```
-
-### 5. Verify Deployment
-
-```bash
-# Check Helm release status
 helm status openan -n openan
-
-# Check Pod status
 kubectl get pods -n openan
-
-# Check all resources
-kubectl get all -n openan
-
-# Check Ingress
 kubectl get ingress -n openan
-
-# Check logs
-kubectl logs -n openan -l app=registry-center -f
-kubectl logs -n openan -l app=orchestration-center -f
 ```
 
-### 6. Access Services
+### Access Services
 
-#### Method 1: LoadBalancer (Recommended)
-
-If your cluster has a LoadBalancer (MetalLB or cloud provider):
+#### LoadBalancer (Recommended)
 
 ```bash
-# Get the LoadBalancer IP
 INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "Access URL: http://$INGRESS_IP/"
+echo "http://$INGRESS_IP/"
 ```
 
-**Access Workflow Designer (Frontend):**
+| Service | URL |
+|---------|-----|
+| Workflow Designer | `http://<INGRESS_IP>/` |
+| Registry API | `http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards` |
+| Orchestration API | `http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards` |
 
-Open browser at `http://<INGRESS_IP>/`
-
-**Access Registry API:**
-
-```bash
-# Query all Agents
-curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards
-
-# Register new Agent
-curl -X POST http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-agent",
-    "description": "My custom agent",
-    "url": "http://my-agent:8080",
-    "version": "1.0.0"
-  }'
-
-# Query specific Agent
-curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards/my-agent
-
-# Delete Agent
-curl -X DELETE http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards/my-agent
-```
-
-**Access Orchestration API:**
+#### NodePort (Frontend Only)
 
 ```bash
-# Query Agent list
-curl http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards
-```
-
-#### Method 2: NodePort
-
-If LoadBalancer is not available, use NodePort to access the frontend:
-
-```bash
-# Get NodePort
 NODE_PORT=$(kubectl get svc -n openan workflow-designer -o jsonpath='{.spec.ports[0].nodePort}')
-
-# Get any node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-echo "Access URL: http://$NODE_IP:$NODE_PORT/"
+echo "http://$NODE_IP:$NODE_PORT/"
 ```
 
-> **Note:** NodePort only provides access to the frontend. API access requires LoadBalancer or port-forwarding.
-
-#### Port Forwarding (Fallback)
-
-If neither LoadBalancer nor NodePort is available, use port-forwarding for local access:
+#### Port Forwarding
 
 ```bash
-# Registry Center
 kubectl -n openan port-forward svc/registry-center 5000:5000
-curl http://localhost:5000/rest/v1/registry-center/agent-cards
-
-# Orchestration Center
 kubectl -n openan port-forward svc/orchestration-center 5001:5001
-curl http://localhost:5001/rest/v1/orchestrate/agent-cards
-
-# Workflow Designer
 kubectl -n openan port-forward svc/workflow-designer 8080:80
-echo "http://localhost:8080"
 ```
 
 ## Configuration Parameters
 
-### Global Configuration
+### Global
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `namespace` | Kubernetes namespace | `openan` |
-| `createNamespace` | Whether Helm creates the namespace | `true` |
+| `createNamespace` | Helm creates the namespace | `true` |
 
-**Note**: If the namespace already exists and is not managed by Helm, set `createNamespace=false`, otherwise you will encounter a "namespace already exists" error.
-
-### PostgreSQL Configuration
+### PostgreSQL
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `postgresql.enabled` | Enable built-in PostgreSQL | `true` |
 | `postgresql.externalHost` | External database address | `""` |
 | `postgresql.port` | Database port | `5432` |
-| `postgresql.password` | Database password | `"openan-db-password"` |
+| `postgresql.password` | Database password | `openan-db-password` |
+| `postgresql.existingSecret` | Reference existing Secret for password | `""` |
 | `postgresql.storage.size` | Storage size | `20Gi` |
+| `postgresql.storage.storageClassName` | StorageClass name (auto-detect if empty) | `""` |
 | `postgresql.storage.createStorageClass` | Auto-create StorageClass | `false` |
 | `postgresql.storage.createPV` | Auto-create PV | `false` |
-| `postgresql.storage.storageClassName` | StorageClass name | `"openan-local"` |
+| `postgresql.storage.useHostPath` | Use hostPath (single-node) | `false` |
+| `postgresql.storage.hostPath` | hostPath directory | `/data/openan-postgres` |
+| `postgresql.storage.reclaimPolicy` | Reclaim policy | `Retain` |
 | `postgresql.storage.setDefault` | Set as default StorageClass | `false` |
-| `postgresql.storage.reclaimPolicy` | Reclaim policy (Retain/Delete) | `"Retain"` |
-| `postgresql.storage.useHostPath` | Use hostPath (single-node cluster) | `true` |
-| `postgresql.storage.hostPath` | hostPath directory | `"/data/openan-postgres"` |
-| `postgresql.storage.nodeName` | Node name (when useHostPath=false) | `""` |
+| `postgresql.resources.requests` | Resource requests | `cpu: 250m, memory: 256Mi` |
+| `postgresql.resources.limits` | Resource limits | `cpu: 500m, memory: 512Mi` |
 
-**Production Storage Recommendations:**
-
-The default configuration uses hostPath for quick setup in development/testing environments. For production deployments, it is recommended to use NFS or cloud storage:
-
-- **NFS**: Configure an external NFS server for shared storage across nodes
-- **Cloud Storage**: Use cloud provider's block storage (e.g., AWS EBS, Alibaba Cloud Disk, Tencent Cloud CBS)
-- **External Database**: Use managed database services (e.g., RDS, PolarDB) for high availability
-
-To use an existing StorageClass in your cluster:
-```yaml
-postgresql:
-  storage:
-    storageClassName: "your-storage-class"
-```
-
-
-### Registry Center Configuration
+### Registry Center
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `registry.enabled` | Enable Registry Center | `true` |
 | `registry.replicas` | Replica count | `2` |
-| `registry.image.repository` | Image registry | `registry-center` |
-| `registry.image.tag` | Image tag | `latest` |
+| `registry.image.repository` | Image repository | `ghcr.io/xunliyang/registry-center` |
+| `registry.image.tag` | Image tag | `v1.0.0` |
 | `registry.image.pullPolicy` | Image pull policy | `Always` |
 | `registry.port` | Service port | `5000` |
-| `registry.llm.chat.model` | Chat model | `deepseek-chat` |
-| `registry.llm.chat.url` | Chat API URL | `https://api.deepseek.com/v1/chat/completions` |
-| `registry.llm.chat.apiKey` | Chat API Key | `""` |
+| `registry.llm.chat.model` | Chat model | `your-chat-model` |
+| `registry.llm.chat.url` | Chat API URL | `https://your-llm-provider.com/v1/chat/completions` |
+| `registry.llm.chat.apiKey` | Chat API Key | `your-api-key` |
 | `registry.llm.chat.existingSecret` | Reference existing Secret | `""` |
-| `registry.llm.embed.model` | Embed model | `bge-m3` |
-| `registry.llm.embed.url` | Embed API URL | `""` |
-| `registry.llm.embed.apiKey` | Embed API Key | `""` |
-| `registry.llm.rerank.model` | Rerank model | `bge-reranker-v2-m3` |
-| `registry.llm.rerank.url` | Rerank API URL | `""` |
-| `registry.llm.rerank.apiKey` | Rerank API Key | `""` |
+| `registry.llm.embed.model` | Embed model | `your-embed-model` |
+| `registry.llm.embed.url` | Embed API URL | `https://your-llm-provider.com/v1/embeddings` |
+| `registry.llm.embed.apiKey` | Embed API Key | `your-api-key` |
+| `registry.llm.rerank.model` | Rerank model | `your-rerank-model` |
+| `registry.llm.rerank.url` | Rerank API URL | `https://your-llm-provider.com/v1/rerank` |
+| `registry.llm.rerank.apiKey` | Rerank API Key | `your-api-key` |
 | `registry.vectordb.enabled` | Enable VectorDB (Milvus) | `false` |
 | `registry.vectordb.host` | VectorDB address | `""` |
 | `registry.vectordb.port` | VectorDB port | `19530` |
-| `registry.tls.mode` | TLS certificate mode: `auto`/`secret`/`off` | `auto` |
-| `registry.tls.existingSecret` | TLS certificate Secret name | `""` |
-| `registry.signing.mode` | JWS signing certificate mode: `auto`/`secret`/`off` | `auto` |
-| `registry.signing.existingSecret` | JWS signing certificate Secret name | `""` |
+| `registry.tls.mode` | TLS mode: `auto` / `secret` / `off` | `auto` |
+| `registry.tls.existingSecret` | TLS Secret name | `""` |
+| `registry.signing.mode` | Signing cert mode: `auto` / `secret` / `off` | `auto` |
+| `registry.signing.existingSecret` | Signing cert Secret name | `""` |
 | `registry.resources.requests` | Resource requests | `cpu: 250m, memory: 256Mi` |
 | `registry.resources.limits` | Resource limits | `cpu: 500m, memory: 512Mi` |
-| `registry.livenessProbe` | Liveness probe | `path: /rest/v1/registry-center/agent-cards` |
-| `registry.readinessProbe` | Readiness probe | `path: /rest/v1/registry-center/agent-cards` |
 
-### Orchestration Center Configuration
+### Orchestration Center
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `orchestration.enabled` | Enable Orchestration Center | `true` |
-| `orchestration.replicas` | Replica count | `2` |
-| `orchestration.image.repository` | Image registry | `orchestration-center` |
-| `orchestration.image.tag` | Image tag | `latest` |
+| `orchestration.replicas` | Replica count | `1` |
+| `orchestration.image.repository` | Image repository | `ghcr.io/xunliyang/orchestration-center` |
+| `orchestration.image.tag` | Image tag | `v1.0.0` |
 | `orchestration.image.pullPolicy` | Image pull policy | `Always` |
 | `orchestration.port` | Service port | `5001` |
 | `orchestration.agentRegistryUrl` | Registry Center URL | `""` (auto-discovered) |
-| `orchestration.llm.chat.model` | Chat model | `deepseek-chat` |
-| `orchestration.llm.chat.url` | Chat API URL | `https://api.deepseek.com/v1/chat/completions` |
-| `orchestration.llm.chat.apiKey` | Chat API Key | `""` |
+| `orchestration.llm.chat.model` | Chat model | `your-chat-model` |
+| `orchestration.llm.chat.url` | Chat API URL | `https://your-llm-provider.com/v1/chat/completions` |
+| `orchestration.llm.chat.apiKey` | Chat API Key | `your-api-key` |
 | `orchestration.llm.chat.existingSecret` | Reference existing Secret | `""` |
-| `orchestration.a2at.provider` | A2AT provider | `deepseek` |
-| `orchestration.a2at.model` | A2AT model | `deepseek-chat` |
-| `orchestration.a2at.baseUrl` | A2AT Base URL | `https://api.deepseek.com` |
-| `orchestration.a2at.apiKey` | A2AT API Key | `""` |
-| `orchestration.a2at.existingSecret` | Reference existing Secret | `""` |
-| `orchestration.hpa.enabled` | Enable HPA | `true` |
-| `orchestration.hpa.minReplicas` | Minimum replicas | `2` |
+| `orchestration.hpa.enabled` | Enable HPA | `false` |
+| `orchestration.hpa.minReplicas` | Minimum replicas | `1` |
 | `orchestration.hpa.maxReplicas` | Maximum replicas | `10` |
 | `orchestration.resources.requests` | Resource requests | `cpu: 250m, memory: 512Mi` |
 | `orchestration.resources.limits` | Resource limits | `cpu: 1000m, memory: 1Gi` |
-| `orchestration.livenessProbe` | Liveness probe | `path: /rest/v1/orchestrate/agent-cards` |
-| `orchestration.readinessProbe` | Readiness probe | `path: /rest/v1/orchestrate/agent-cards` |
 
-### Workflow Designer Configuration
+### Workflow Designer
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `frontend.enabled` | Enable Workflow Designer | `true` |
 | `frontend.replicas` | Replica count | `2` |
-| `frontend.image.repository` | Image registry | `workflow-designer` |
-| `frontend.image.tag` | Image tag | `latest` |
+| `frontend.image.repository` | Image repository | `ghcr.io/xunliyang/workflow-designer` |
+| `frontend.image.tag` | Image tag | `v1.0.0` |
 | `frontend.image.pullPolicy` | Image pull policy | `Always` |
 | `frontend.port` | Service port | `80` |
-| `frontend.nodePort` | NodePort port | `30080` |
+| `frontend.nodePort` | NodePort | `30191` |
 | `frontend.nginxConfig` | Nginx configuration (ConfigMap) | See values.yaml |
 | `frontend.hpa.enabled` | Enable HPA | `true` |
 | `frontend.hpa.minReplicas` | Minimum replicas | `2` |
@@ -408,37 +211,7 @@ postgresql:
 | `frontend.resources.requests` | Resource requests | `cpu: 100m, memory: 128Mi` |
 | `frontend.resources.limits` | Resource limits | `cpu: 500m, memory: 256Mi` |
 
-**Nginx Configuration:**
-
-Workflow Designer uses ConfigMap for nginx configuration, allowing runtime customization without rebuilding the image. The nginx config is mounted to `/etc/nginx/conf.d/default.conf`.
-
-To customize nginx configuration, modify `frontend.nginxConfig` in values.yaml:
-
-```yaml
-frontend:
-  nginxConfig: |
-    server {
-        listen 80;
-        server_name localhost;
-        root /usr/share/nginx/html;
-        index index.html;
-
-        location /rest/v1/orchestrate/ {
-            proxy_pass http://orchestration-center:5001;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_buffering off;
-            proxy_read_timeout 300s;
-        }
-
-        location / {
-            try_files $uri $uri/ /index.html;
-        }
-    }
-```
-
-### Ingress Configuration
+### Ingress
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -450,146 +223,49 @@ frontend:
 
 ## Deployment Scenarios
 
-### Production Environment
+### Production
 
 ```bash
-helm install openan-prod . \
-  --namespace openan-prod \
-  --create-namespace \
-  -f values-prod.yaml
+helm install openan-prod ./openan-chart --namespace openan-prod --create-namespace -f values-prod.yaml
 ```
 
-Example `values-prod.yaml`:
-
-```yaml
-postgresql:
-  storage:
-    size: 100Gi
-  resources:
-    requests:
-      cpu: 1000m
-      memory: 2Gi
-    limits:
-      cpu: 2000m
-      memory: 4Gi
-
-registry:
-  replicas: 3
-  resources:
-    requests:
-      cpu: 500m
-      memory: 512Mi
-    limits:
-      cpu: 1000m
-      memory: 1Gi
-
-orchestration:
-  replicas: 3
-  hpa:
-    minReplicas: 3
-    maxReplicas: 20
-  resources:
-    requests:
-      cpu: 500m
-      memory: 1Gi
-    limits:
-      cpu: 2000m
-      memory: 2Gi
-
-frontend:
-  replicas: 3
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-
-ingress:
-  host: openan.example.com  # Optional: set for hostname-based routing
-  tls:
-    enabled: true
-    secretName: openan-tls
-```
-
-### Deploy Registry Center Only
+### Registry Only
 
 ```bash
-helm install openan-registry . \
-  --namespace openan \
-  --create-namespace \
-  --set orchestration.enabled=false \
-  --set frontend.enabled=false
+helm install openan ./openan-chart -n openan --create-namespace \
+  --set orchestration.enabled=false --set frontend.enabled=false
 ```
 
-### Use External Database
+### External Database
 
 ```bash
-helm install openan . \
-  --namespace openan \
-  --create-namespace \
+helm install openan ./openan-chart -n openan --create-namespace \
   --set postgresql.enabled=false \
   --set postgresql.externalHost=db.example.com \
-  --set postgresql.port=5432 \
   --set postgresql.password=your-password
-```
-
-### Namespace Already Exists
-
-If the namespace already exists and is not managed by Helm, manually create the namespace and set `createNamespace=false`:
-
-```bash
-# Manually create namespace
-kubectl create namespace openan
-
-# Disable Helm namespace creation during install
-helm install openan . \
-  --namespace openan \
-  --set createNamespace=false
 ```
 
 ## Common Operations
 
-### Upgrade
-
 ```bash
-helm upgrade openan . --namespace openan -f values.yaml
-```
+# Upgrade
+helm upgrade openan ./openan-chart -n openan -f values.yaml
 
-### Rollback
+# Upgrade with --reuse-values (only override specified fields)
+helm upgrade openan ./openan-chart -n openan --reuse-values \
+  --set registry.llm.chat.apiKey="new-key"
 
-```bash
-# View release history
+# Rollback
 helm history openan -n openan
-
-# Rollback to specific version
 helm rollback openan 1 -n openan
-```
 
-### Uninstall
-
-```bash
+# Uninstall
 helm uninstall openan -n openan
+kubectl delete pvc -n openan --all  # optional: remove data
 
-# Delete PVC (optional)
-kubectl delete pvc -n openan --all
-```
-
-### View Logs
-
-```bash
-# Registry Center
+# Logs
 kubectl logs -n openan -l app=registry-center -f
-
-# Orchestration Center
 kubectl logs -n openan -l app=orchestration-center -f
-
-# Workflow Designer
-kubectl logs -n openan -l app=workflow-designer -f
-
-# PostgreSQL
-kubectl logs -n openan -l app=openan-postgres -f
 ```
 
 ## Architecture
@@ -602,17 +278,17 @@ kubectl logs -n openan -l app=openan-postgres -f
 │  ┌──────────────┐      ┌───────────────────────────────────┐   │
 │  │   Ingress    │─────▶│  Workflow Designer (Frontend)     │   │
 │  │  (Nginx)     │      │  - Deployment (2 pods)            │   │
-│  │  / → :80     │      │  - Service :80                    │   │
+│  │  / → :80     │      │  - Service :80 (NodePort: 30191)  │   │
 │  │  /api/       │      │  - HPA                            │   │
 │  │  orchestrate │      └───────────────────────────────────┘   │
 │  │  → :5001     │                      │                       │
-│  │  /registry   │                      │ AGENT_REGISTRY_URL    │
+│  │  /registry   │                      │ (nginx proxy)         │
 │  │  → :5000     │                      ▼                       │
 │  └──────────────┘      ┌───────────────────────────────────┐  │
 │                        │  Orchestration Center              │  │
-│                        │  - Deployment (2 pods)             │  │
+│                        │  - Deployment (1 pod)              │  │
 │                        │  - Service :5001                   │  │
-│                        │  - HPA                             │  │
+│                        │  - HPA (optional)                  │  │
 │                        └───────────────────────────────────┘  │
 │                                  │                             │
 │                                  ▼                             │
@@ -636,69 +312,36 @@ kubectl logs -n openan -l app=openan-postgres -f
 
 **Ingress Path Rewrite Rules:**
 
-| External Path | Forwarded to Backend | Description |
-|---------------|---------------------|-------------|
-| `/` | `workflow-designer:80/` | Frontend pages |
-| `/api/orchestrate/rest/v1/orchestrate/...` | `orchestration-center:5001/rest/v1/orchestrate/...` | Strip `/api/orchestrate` prefix |
-| `/registry/rest/v1/registry-center/...` | `registry-center:5000/rest/v1/registry-center/...` | Strip `/registry` prefix |
-
-**Ingress Host Configuration:**
-
-- With LoadBalancer IP: `ingress.host` is not set, allowing access via IP directly
-- Without LoadBalancer IP: `ingress.host` is set to the configured hostname (default: `openan.local`)
-- Provides a unified entry point for all services
-- Provides URL matching isolation and path rewriting
+| External Path | Backend | Rewrite |
+|---------------|---------|---------|
+| `/` | `workflow-designer:80` | None |
+| `/api/orchestrate/rest/v1/orchestrate/...` | `orchestration-center:5001/rest/v1/orchestrate/...` | Strip `/api/orchestrate` |
+| `/registry/rest/v1/registry-center/...` | `registry-center:5000/rest/v1/registry-center/...` | Strip `/registry` |
 
 ## Certificate Management
 
 Registry Center requires two types of certificates:
 
-| Certificate Type | Purpose | Mount Path | Files |
-|-----------------|---------|------------|-------|
-| TLS Certificate | HTTPS communication | `etc/ssl/` | server.cer, server_key.pem, trust.cer |
-| JWS Signing Certificate | Agent Card signing | `etc/sign_cert/` | server.cer, server_key.pem, cert_pwd |
+| Type | Purpose | Mount Path |
+|------|---------|------------|
+| TLS | HTTPS communication | `/opt/registry-center/etc/ssl` |
+| JWS Signing | Agent Card signing | `/opt/registry-center/etc/sign_cert` |
 
-### Certificate Modes
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `auto` (default) | Helm generates self-signed certs, stored in Secret, preserved across upgrades via `lookup` | Recommended |
+| `secret` | User-provided K8S Secret | Production with official CA |
+| `off` | Entrypoint generates per-pod, not persisted | Dev/debug only |
 
-| Mode | Description | Multi-replica Consistency | Use Case |
-|------|-------------|---------------------------|----------|
-| `auto` (default) | Helm auto-generates using `genCA`/`genSignedCert`, stored in Secret | Consistent | Recommended for all scenarios |
-| `secret` | Mount from user-pre-created K8S Secret | Consistent | Requires official certificates |
-| `off` | Entrypoint auto-generates on each start, not persisted | Inconsistent | Development/debugging only |
-
-### How `auto` Mode Works
-
-1. During `helm install`, Helm templates call `genCA` + `genSignedCert` to generate self-signed certificates
-2. Certificate data is written to K8S Secrets (`registry-center-tls` / `registry-center-signing`)
-3. Deployment mounts Secrets to `etc/ssl` and `etc/sign_cert`
-4. Entrypoint detects certificate files already exist, skips auto-generation
-5. During `helm upgrade`, uses `lookup` to detect existing Secrets, **preserves original certificates without regeneration**
-
-**Works out of the box with no manual intervention required.**
-
-### Using Auto-generated Certificates (Default)
-
-```yaml
-registry:
-  tls:
-    mode: auto
-  signing:
-    mode: auto
-```
-
-### Using Custom Certificates
+Custom certificates:
 
 ```bash
-# Create TLS certificate Secret
-kubectl create secret generic registry-tls \
-  --namespace openan \
+kubectl create secret generic registry-tls -n openan \
   --from-file=server.cer=./server.crt \
   --from-file=server_key.pem=./server.key \
   --from-file=trust.cer=./ca.crt
 
-# Create JWS signing certificate Secret
-kubectl create secret generic registry-signing \
-  --namespace openan \
+kubectl create secret generic registry-signing -n openan \
   --from-file=server.cer=./sign_cert/server.cer \
   --from-file=server_key.pem=./sign_cert/server_key.pem \
   --from-file=cert_pwd=./sign_cert/cert_pwd.txt
@@ -714,81 +357,19 @@ registry:
     existingSecret: registry-signing
 ```
 
-## Security Recommendations
-
-1. **Certificate Management**: Default `auto` mode generates self-signed certificates; production environments should use `secret` mode with official CA certificates
-2. **Secret Management**: Production environments should use Vault, AWS Secrets Manager, etc. to manage sensitive information via `existingSecret` references
-3. **Enable TLS**: Configure Ingress TLS or use cert-manager for automatic certificate issuance
-4. **Network Policies**: Use NetworkPolicy to restrict Pod-to-Pod communication
-5. **Image Security**: Use private image registries and enable image signature verification
-6. **Resource Limits**: Set reasonable requests/limits to prevent resource abuse
-
 ## Troubleshooting
 
-### Namespace Conflict
-
-If you encounter a "namespace already exists" error:
-
-```bash
-# Option 1: Delete existing namespace and reinstall
-kubectl delete namespace openan
-helm install openan . --namespace openan --create-namespace
-
-# Option 2: Manually create namespace and set createNamespace=false
-kubectl create namespace openan
-helm install openan . --namespace openan --set createNamespace=false
-
-# Option 3: Clean up Helm release cache
-kubectl get secrets --all-namespaces | grep "sh.helm.release" | grep openan
-kubectl delete secret -l owner=helm,name=openan --all-namespaces
-helm install openan . --namespace openan --create-namespace
-```
-
-### Pod Cannot Start
-
-```bash
-# Check Pod status
-kubectl describe pod -n openan <pod-name>
-
-# Check logs
-kubectl logs -n openan <pod-name>
-```
-
-### Database Connection Failed
-
-```bash
-# Check PostgreSQL Pod
-kubectl get pods -n openan -l app=openan-postgres
-
-# Test database connection
-kubectl exec -n openan <postgres-pod> -- psql -U postgres -c "\l"
-```
-
-### Ingress Not Accessible
-
-```bash
-# Check Ingress resources
-kubectl describe ingress -n openan
-
-# Check Ingress Controller logs
-kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller
-```
-
-### Certificate Issues
-
-```bash
-# Check certificate Secrets
-kubectl get secret -n openan registry-center-tls -o yaml
-kubectl get secret -n openan registry-center-signing -o yaml
-
-# Check certificate mounts
-kubectl exec -n openan <registry-pod> -- ls -la /opt/registry-center/etc/ssl
-kubectl exec -n openan <registry-pod> -- ls -la /opt/registry-center/etc/sign_cert
-```
+| Issue | Command |
+|-------|---------|
+| Namespace conflict | `kubectl delete namespace openan` then reinstall, or `--set createNamespace=false` |
+| Pod cannot start | `kubectl -n openan describe pod <pod-name>` |
+| Database connection | `kubectl -n openan logs -l app=openan-postgres` |
+| Ingress not accessible | `kubectl -n openan describe ingress` |
+| Certificate issues | `kubectl -n openan get secret registry-center-tls registry-center-signing` |
 
 ## Related Documentation
 
-- [Quick Start](../QUICKSTART.md) (Build + Deploy one-stop guide)
+- [Quick Start](../QUICKSTART.md)
 - [Image Build Guide](../build/README.md)
 
 ## License
