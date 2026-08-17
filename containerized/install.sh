@@ -771,9 +771,10 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
 fi
 
 HELM_ARGS="$HELM_ARGS --set postgresql.password=$CONFIG_DB_PASSWORD"
-HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
 if [ -n "$INGRESS_IP" ]; then
     log_info "Using LoadBalancer IP: $INGRESS_IP"
+else
+    HELM_ARGS="$HELM_ARGS --set ingress.host=$CONFIG_INGRESS_HOST"
 fi
 
 # Check if default StorageClass exists
@@ -848,15 +849,11 @@ echo "=========================================="
 echo "  Setup Complete!"
 echo "=========================================="
 echo ""
-ACCESS_HOST="$CONFIG_INGRESS_HOST"
-INGRESS_DISPLAY_IP="${INGRESS_IP:-<ingress-ip>}"
+ACCESS_HOST="${INGRESS_IP:-$CONFIG_INGRESS_HOST}"
 echo "  Access the platform:"
 echo "    - Workflow Designer: http://$ACCESS_HOST/"
 echo "    - Registry API:      http://$ACCESS_HOST/registry/rest/v1/registry-center/agent-cards"
 echo "    - Orchestration API: http://$ACCESS_HOST/api/orchestrate/rest/v1/orchestrate/agent-cards"
-echo ""
-echo "  Add to /etc/hosts:"
-echo "    $INGRESS_DISPLAY_IP  $CONFIG_INGRESS_HOST"
 echo ""
 echo "  Check status:"
 echo "    kubectl -n $CONFIG_K8S_NAMESPACE get pods"
