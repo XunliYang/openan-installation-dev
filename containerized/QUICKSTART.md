@@ -17,7 +17,7 @@ The setup script will automatically install missing tools (Docker, kubectl, Helm
 
 ```bash
 # Clone the repository
-git clone https://github.com/XunliYang/openan-installation-dev.git
+git clone https://github.com/project-openan/openan-installation.git
 cd openan-installation-dev/containerized
 
 # Run the interactive installation script
@@ -37,17 +37,16 @@ The script will guide you through an interactive setup:
    - All components (default): Registry Center + Orchestration Center + Workflow Designer
    - Registry Center only
    - Orchestration Center + Workflow Designer only
-   - Custom selection
 
 3. **[3/5] Registry Center LLM Configuration** - Configure LLM for Registry Center:
    - Chat Model (required, e.g., `gpt-4`, `claude-3-opus`, `qwen-max`)
    - API URL (required, e.g., `https://api.openai.com/v1/chat/completions`)
-   - API Key (required)
+   - API Key (required, input is hidden)
 
 4. **[4/5] Orchestration Center LLM Configuration** - Configure LLM for Orchestration Center:
    - Chat Model (required, e.g., `gpt-4`, `claude-3-opus`, `qwen-max`)
    - Chat API URL (required, e.g., `https://api.openai.com/v1/chat/completions`)
-   - Chat API Key (required)
+   - Chat API Key (required, input is hidden)
 
 5. **[5/5] Agent Examples Configuration** - Start demo agents server:
    - Start agent examples server (default: Yes)
@@ -86,23 +85,42 @@ kubectl -n openan get ingress
 
 ### Get Access URL
 
-The setup script automatically detects or configures a LoadBalancer IP. After deployment, get the access URL:
+The setup script displays the access URL after deployment. Two access methods are available:
+
+#### Method 1: LoadBalancer (Recommended)
+
+If your cluster has a LoadBalancer (MetalLB or cloud provider):
 
 ```bash
 # Get the LoadBalancer IP
 INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
-echo "Access URL: http://$INGRESS_IP/"
+if [ -n "$INGRESS_IP" ]; then
+  echo "Access URL: http://$INGRESS_IP/"
+else
+  echo "LoadBalancer IP not assigned yet. Wait a few minutes and try again."
+fi
 ```
 
-If the LoadBalancer IP is empty (e.g., on cloud environments without MetalLB), use the node IP:
+#### Method 2: NodePort
+
+If LoadBalancer is not available, use NodePort to access the frontend:
 
 ```bash
-INGRESS_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-echo "Access URL: http://$INGRESS_IP:<nodeport>/"
+# Get NodePort
+NODE_PORT=$(kubectl get svc -n openan workflow-designer -o jsonpath='{.spec.ports[0].nodePort}')
+
+# Get any node IP
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+echo "Access URL: http://$NODE_IP:$NODE_PORT/"
 ```
 
+> **Note:** NodePort only provides access to the frontend. API access requires LoadBalancer or port-forwarding.
+
 ### Access Services
+
+**Via LoadBalancer:**
 
 | Service | URL |
 |---------|-----|
@@ -110,65 +128,28 @@ echo "Access URL: http://$INGRESS_IP:<nodeport>/"
 | **Registry API** | `http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards` |
 | **Orchestration API** | `http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards` |
 
+**Via NodePort:**
+
+| Service | URL |
+|---------|-----|
+| **Workflow Designer** (Frontend) | `http://<NODE_IP>:<NODE_PORT>/` |
+
 ### Test APIs
 
 ```bash
-# Test Registry API
+# Test Registry API (via LoadBalancer)
 curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards
 
-# Test Orchestration API
+# Test Orchestration API (via LoadBalancer)
 curl http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards
 ```
 
 > **Note:** If no agent-cards are registered in the Registry Center, the API may return an error or empty response. This is expected behavior for a fresh installation. You can register agents through the Workflow Designer UI or via the Registry API.
 
-### Access via NodePort (Fallback)
-
-If LoadBalancer is not available (MetalLB installation failed or not supported), you can access the frontend via NodePort:
-
-```bash
-# Get NodePort
-NODE_PORT=$(kubectl get svc -n openan workflow-designer -o jsonpath='{.spec.ports[0].nodePort}')
-
-# Get any node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
-
-# Access frontend
-echo "http://$NODE_IP:$NODE_PORT"
-```
-
-## Update Configuration
-
-If you missed filling in API keys during installation, or need to update LLM configuration later, use `helm upgrade` with `--reuse-values`:
-
-```bash
-# Update Registry Center API Key
-helm upgrade openan ./openan-chart \
-  -n openan \
-  --reuse-values \
-  --set registry.llm.chat.apiKey="your-api-key"
-
-# Update Orchestration Center API Keys
-helm upgrade openan ./openan-chart \
-  -n openan \
-  --reuse-values \
-  --set orchestration.llm.chat.apiKey="your-chat-api-key" \
-  --set orchestration.a2at.apiKey="your-a2at-api-key"
-
-# Update all at once
-helm upgrade openan ./openan-chart \
-  -n openan \
-  --reuse-values \
-  --set registry.llm.chat.apiKey="your-registry-key" \
-  --set orchestration.llm.chat.apiKey="your-orch-chat-key" \
-  --set orchestration.a2at.apiKey="your-orch-a2at-key"
-```
-
-`--reuse-values` preserves existing configuration and only overrides the fields you specify. Pods will restart automatically after the upgrade.
 
 ## Cleanup
 
-### One-click Uninstall (Recommended)
+### One-click Uninstall
 
 Use the automated uninstall script:
 
@@ -189,40 +170,6 @@ The script will:
 - **Preserve data**: Keep PVCs/PV for reinstallation or backup
 - **Remove data**: Delete all persistent storage (database data will be lost)
 
-### Manual Uninstall
-
-If you prefer to uninstall manually:
-
-```bash
-# Uninstall Helm release
-helm uninstall openan -n openan
-
-# Remove MetalLB configuration (if installed by OpenAN)
-kubectl delete ipaddresspool openan-pool -n metallb-system
-kubectl delete l2advertisement openan-l2 -n metallb-system
-
-# Delete PVCs (optional, clears database data)
-kubectl delete pvc -n openan --all
-
-# Delete PV (if created)
-kubectl delete pv openan-postgres-pv
-
-# Delete namespace (removes all remaining resources)
-kubectl delete namespace openan
-```
-
-**hostPath Storage Cleanup:**
-
-If using hostPath storage, you need to manually clean up data on the node:
-
-```bash
-# Find the node where postgres was running
-kubectl get pod openan-postgres-0 -n openan -o jsonpath='{.spec.nodeName}'
-
-# SSH to that node and remove the data
-ssh <node-name>
-sudo rm -rf /data/openan-postgres
-```
 
 ## Troubleshooting
 
@@ -246,7 +193,7 @@ kubectl get pv
 # Check agents server logs
 kubectl exec -n openan $(kubectl get pods -n openan -l app=orchestration-center -o jsonpath='{.items[0].metadata.name}') -- cat /tmp/agents-server.log
 
-# Manually start agents server
+# Manually start agents server (requires registry-center to be ready first)
 kubectl exec -n openan $(kubectl get pods -n openan -l app=orchestration-center -o jsonpath='{.items[0].metadata.name}') -- /bin/sh -c "cd /opt/orchestration-center && PYTHONPATH=/opt/orchestration-center nohup python3 samples/start_agents_server.py > /tmp/agents-server.log 2>&1 &"
 
 # Verify agents server is running

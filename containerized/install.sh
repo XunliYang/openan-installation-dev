@@ -849,11 +849,21 @@ echo "=========================================="
 echo "  Setup Complete!"
 echo "=========================================="
 echo ""
-ACCESS_HOST="${INGRESS_IP:-$CONFIG_INGRESS_HOST}"
-echo "  Access the platform:"
-echo "    - Workflow Designer: http://$ACCESS_HOST/"
-echo "    - Registry API:      http://$ACCESS_HOST/registry/rest/v1/registry-center/agent-cards"
-echo "    - Orchestration API: http://$ACCESS_HOST/api/orchestrate/rest/v1/orchestrate/agent-cards"
+
+if [ -n "$INGRESS_IP" ]; then
+    echo "  Access the platform (LoadBalancer):"
+    echo "    - Workflow Designer: http://$INGRESS_IP/"
+    echo "    - Registry API:      http://$INGRESS_IP/registry/rest/v1/registry-center/agent-cards"
+    echo "    - Orchestration API: http://$INGRESS_IP/api/orchestrate/rest/v1/orchestrate/agent-cards"
+else
+    NODE_PORT=$(kubectl get svc -n "$CONFIG_K8S_NAMESPACE" workflow-designer -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null)
+    NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    echo "  Access the platform (NodePort):"
+    echo "    - Workflow Designer: http://$NODE_IP:$NODE_PORT/"
+    echo ""
+    echo "  Note: NodePort only provides frontend access. Use port-forwarding for API access."
+fi
+
 echo ""
 echo "  Check status:"
 echo "    kubectl -n $CONFIG_K8S_NAMESPACE get pods"

@@ -115,7 +115,11 @@ ingress:
 ### 3. Install Chart
 
 ```bash
-# Install with custom configuration
+# Install with default configuration from values.yaml
+helm install openan . \
+  -n openan --create-namespace
+
+# Install with custom configuration file
 helm install openan . \
   -n openan --create-namespace \
   -f values-custom.yaml
@@ -125,10 +129,9 @@ helm install openan . \
   -n openan --create-namespace \
   --set postgresql.password=your-password \
   --set registry.llm.chat.apiKey=sk-xxx \
-  --set orchestration.llm.chat.apiKey=sk-yyy \
-  --set ingress.host=openan.example.com
+  --set orchestration.llm.chat.apiKey=sk-yyy
 
-# Custom image registry
+# Custom image registry (edit values.yaml or use --set)
 helm install openan . \
   -n openan --create-namespace \
   --set registry.image.repository=harbor.example.com/openan/registry-center \
@@ -202,28 +205,30 @@ kubectl logs -n openan -l app=registry-center -f
 kubectl logs -n openan -l app=orchestration-center -f
 ```
 
-### 6. Access via Ingress
+### 6. Access Services
 
-**Configure hosts (if using custom domain):**
+#### Method 1: LoadBalancer (Recommended)
+
+If your cluster has a LoadBalancer (MetalLB or cloud provider):
 
 ```bash
-# Add to /etc/hosts (Linux/Mac) or C:\Windows\System32\drivers\etc\hosts (Windows)
-# Assuming Ingress Controller IP is 192.168.200.183
-192.168.200.183  openan.local
+# Get the LoadBalancer IP
+INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "Access URL: http://$INGRESS_IP/"
 ```
 
 **Access Workflow Designer (Frontend):**
 
-Open browser at `http://openan.local/`
+Open browser at `http://<INGRESS_IP>/`
 
 **Access Registry API:**
 
 ```bash
 # Query all Agents
-curl http://openan.local/registry/rest/v1/registry-center/agent-cards
+curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards
 
 # Register new Agent
-curl -X POST http://openan.local/registry/rest/v1/registry-center/agent-cards \
+curl -X POST http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards \
   -H "Content-Type: application/json" \
   -d '{
     "name": "my-agent",
@@ -233,20 +238,38 @@ curl -X POST http://openan.local/registry/rest/v1/registry-center/agent-cards \
   }'
 
 # Query specific Agent
-curl http://openan.local/registry/rest/v1/registry-center/agent-cards/my-agent
+curl http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards/my-agent
 
 # Delete Agent
-curl -X DELETE http://openan.local/registry/rest/v1/registry-center/agent-cards/my-agent
+curl -X DELETE http://<INGRESS_IP>/registry/rest/v1/registry-center/agent-cards/my-agent
 ```
 
 **Access Orchestration API:**
 
 ```bash
 # Query Agent list
-curl http://openan.local/api/orchestrate/rest/v1/orchestrate/agent-cards
+curl http://<INGRESS_IP>/api/orchestrate/rest/v1/orchestrate/agent-cards
 ```
 
-**Port Forwarding (for debugging):**
+#### Method 2: NodePort
+
+If LoadBalancer is not available, use NodePort to access the frontend:
+
+```bash
+# Get NodePort
+NODE_PORT=$(kubectl get svc -n openan workflow-designer -o jsonpath='{.spec.ports[0].nodePort}')
+
+# Get any node IP
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+echo "Access URL: http://$NODE_IP:$NODE_PORT/"
+```
+
+> **Note:** NodePort only provides access to the frontend. API access requires LoadBalancer or port-forwarding.
+
+#### Port Forwarding (Fallback)
+
+If neither LoadBalancer nor NodePort is available, use port-forwarding for local access:
 
 ```bash
 # Registry Center
@@ -256,6 +279,10 @@ curl http://localhost:5000/rest/v1/registry-center/agent-cards
 # Orchestration Center
 kubectl -n openan port-forward svc/orchestration-center 5001:5001
 curl http://localhost:5001/rest/v1/orchestrate/agent-cards
+
+# Workflow Designer
+kubectl -n openan port-forward svc/workflow-designer 8080:80
+echo "http://localhost:8080"
 ```
 
 ## Configuration Parameters
@@ -362,7 +389,6 @@ postgresql:
 | `orchestration.resources.limits` | Resource limits | `cpu: 1000m, memory: 1Gi` |
 | `orchestration.livenessProbe` | Liveness probe | `path: /rest/v1/orchestrate/agent-cards` |
 | `orchestration.readinessProbe` | Readiness probe | `path: /rest/v1/orchestrate/agent-cards` |
-| `orchestration.startupProbe` | Startup probe | `failureThreshold: 12` |
 
 ### Workflow Designer Configuration
 
@@ -418,7 +444,7 @@ frontend:
 |-----------|-------------|---------|
 | `ingress.enabled` | Enable Ingress | `true` |
 | `ingress.className` | Ingress Class | `nginx` |
-| `ingress.host` | Domain | `openan.local` |
+| `ingress.host` | Domain (empty for IP-based access) | `""` |
 | `ingress.tls.enabled` | Enable TLS | `false` |
 | `ingress.tls.secretName` | TLS Secret name | `openan-tls` |
 
@@ -481,7 +507,7 @@ frontend:
       memory: 512Mi
 
 ingress:
-  host: openan.example.com
+  host: openan.example.com  # Optional: set for hostname-based routing
   tls:
     enabled: true
     secretName: openan-tls
@@ -616,10 +642,12 @@ kubectl logs -n openan -l app=openan-postgres -f
 | `/api/orchestrate/rest/v1/orchestrate/...` | `orchestration-center:5001/rest/v1/orchestrate/...` | Strip `/api/orchestrate` prefix |
 | `/registry/rest/v1/registry-center/...` | `registry-center:5000/rest/v1/registry-center/...` | Strip `/registry` prefix |
 
-**Why use Ingress Host?**
+**Ingress Host Configuration:**
 
+- With LoadBalancer IP: `ingress.host` is not set, allowing access via IP directly
+- Without LoadBalancer IP: `ingress.host` is set to the configured hostname (default: `openan.local`)
 - Provides a unified entry point for all services
-- Provides url matching isolation and path rewriting. If not config ingress.host, the frontend will accept any host, which may cause conflicts with other services in the cluster.
+- Provides URL matching isolation and path rewriting
 
 ## Certificate Management
 
