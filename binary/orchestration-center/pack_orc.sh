@@ -264,16 +264,9 @@ rm -rf "$FRONTEND_DIR/node_modules"
 cd "$SCRIPT_DIR"
 echo ""
 
-# ─── Copy in the offline install script ──────────────────────────────────────
-echo -e "${YELLOW}Step 5: Adding offline install script...${NC}"
-# The install script is already in scripts/ and was copied with the source
-# Just make sure it's executable
-chmod +x "${BUNDLE_DIR}/bin/install_offline.sh" 2>/dev/null || true
-chmod +x "${BUNDLE_DIR}/bin/install_service.sh" 2>/dev/null || true
-chmod +x "${BUNDLE_DIR}/bin/start.sh" 2>/dev/null || true
-chmod +x "${BUNDLE_DIR}/bin/stop.sh" 2>/dev/null || true
-chmod +x "${BUNDLE_DIR}/bin/start_samples.sh" 2>/dev/null || true
-chmod +x "${BUNDLE_DIR}/bin/stop_samples.sh" 2>/dev/null || true
+# ─── Ensure bin scripts are executable ───────────────────────────────────────
+echo -e "${YELLOW}Step 5: Ensuring scripts are executable...${NC}"
+chmod +x "${BUNDLE_DIR}/bin/"*.sh 2>/dev/null || true
 echo -e "  ${GREEN}✓${NC} Scripts are executable"
 echo ""
 
@@ -305,10 +298,19 @@ target machine from the bundled wheels and npm cache. This ensures architecture
 compatibility (the target machine may have a different CPU architecture).
 
 To install on the air-gapped machine:
+  install_orc.sh (in the same directory as this tarball) handles everything:
+  extraction, venv creation, dependency installation, frontend build,
+  nginx configuration, and service start.
+
+  ./install_orc.sh
+
+  Manual setup (if install_orc.sh is not available):
   1. Extract: tar xzf orchestration-center-offline-bundle.tar.gz
-  2. Run:     ./bin/install_offline.sh
-  3. Edit config files (see bin/OFFLINE_CONFIG_GUIDE.md)
-  4. Start:   bin/start.sh  (or bin/install_service.sh install for systemd)
+  2. Create venv: python3.12 -m venv venv
+  3. Install deps: venv/bin/pip install --no-index --find-links=vendor/wheels -r requirements.txt
+  4. Build frontend: cd workflow-designer && npm install --force --cache vendor/npm-cache && npm run build
+  5. Configure: edit files in etc/conf/ and common/config/
+  6. Start:   bin/start.sh  (or bin/install_service.sh install for systemd)
 
 EOF
 
@@ -338,10 +340,6 @@ echo "Output:  $TARBALL"
 echo "Size:    $TARBALL_SIZE"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Copy $TARBALL to the air-gapped machine (USB, SCP, etc.)"
-echo "  2. Extract:  tar xzf ${BUNDLE_NAME}-bundle.tar.gz"
-echo "  3. Install:  ./${BUNDLE_NAME}/bin/install_offline.sh"
-echo "  4. Configure: edit files in etc/conf/ and common/config/"
-echo "     (see bin/OFFLINE_CONFIG_GUIDE.md for details)"
-echo "  5. Start:    bin/start.sh"
+echo "  1. Copy $TARBALL and install_orc.sh to the air-gapped machine (USB, SCP, etc.)"
+echo "  2. Install:  ./install_orc.sh"
 echo ""

@@ -241,22 +241,30 @@ Prerequisites:
   - No internet connection required
 
 Quick Start:
+  install_reg.sh (in the same directory as this tarball) handles everything:
+  extraction, venv creation, dependency installation, certificate generation,
+  auto-configuration, and service start.
+
+  ./install_reg.sh
+
+  Manual setup (if install_reg.sh is not available):
   1. Extract the package:
      tar -xzf ${PKG_NAME}.tar.gz
 
   2. Enter the directory:
      cd ${PKG_NAME}
 
-  3. Run offline setup (creates venv, installs deps, configures, activates venv):
-     bin/setup_offline.sh
+  3. Create venv and install dependencies from local wheels:
+     python3.12 -m venv venv
+     venv/bin/pip install --no-index --find-links=wheels -r requirements.txt
 
-     To skip interactive configuration:
-     source bin/setup_offline.sh --skip-init
+  4. Configure:
+     venv/bin/python -m agent_registry.init
 
-  4. Start the service:
+  5. Start the service:
      bin/start.sh
 
-  5. Stop the service:
+  6. Stop the service:
      bin/stop.sh
 
 Configuration (can be re-run anytime):
@@ -278,7 +286,7 @@ Directory Layout:
   etc/systemd/      Systemd service templates
   bin/              Operational scripts
   wheels/           Pre-downloaded Python wheel packages (x86_64 + aarch64)
-  venv/             Virtual environment (created by setup_offline.sh)
+  venv/             Virtual environment (created by install_reg.sh)
   log/              Runtime logs
   run/              Runtime PID/socket files
   data/             File-based storage data
@@ -303,9 +311,6 @@ echo -e "${GREEN}============================================${NC}"
 echo "  File: ${OUTPUT_DIR}/${PKG_NAME}.tar.gz"
 echo "  Size: ${ARCHIVE_SIZE}"
 echo ""
-echo "  Transfer this file to the offline machine, then:"
-echo "    tar -xzf ${PKG_NAME}.tar.gz"
-echo "    cd ${PKG_NAME}"
-echo "    source bin/setup_offline.sh"
-echo "    bin/start.sh"
+echo "  Transfer this file and install_reg.sh to the offline machine, then:"
+echo "    ./install_reg.sh"
 echo -e "${GREEN}============================================${NC}"

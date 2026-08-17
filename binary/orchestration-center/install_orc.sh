@@ -1,27 +1,20 @@
 #!/bin/bash
 # =============================================================================
-# install_offline.sh
-# =============================================================================
-# Run this on the AIR-GAPPED (offline) machine to install the Orchestration
-# Center from the offline bundle.
+# install_orc.sh - One-click offline installer for Orchestration Center
 #
-# This script:
-#   1. Detects the system architecture (x86_64 or aarch64)
-#   2. Verifies the bundle is complete (wheels + npm cache for detected arch)
-#   3. Installs the project to /opt/orchestration-center (or custom dir)
-#   4. Builds a Python venv from the bundled wheels (no internet needed)
-#   5. Builds frontend node_modules from the bundled npm cache (no internet)
-#   6. Optionally installs as a systemd service
-#   7. Prints next steps for configuration
+# Runs on the OFFLINE machine, in the same directory as pack_orc.sh.
+# Finds the tarball produced by pack_orc.sh, extracts it, creates venv,
+# installs dependencies from local wheels, builds frontend from npm cache,
+# deploys static assets, configures nginx HTTPS reverse proxy, and starts
+# the service — all in one step.
 #
 # Usage:
-#   ./install_offline.sh [--dir=/custom/path] [--service] [--no-service]
+#   ./install_orc.sh
 #
 # Prerequisites on the offline machine:
-#   - Python 3.12+ (system Python)
-#   - Node.js 20.19+ (for frontend build)
-#   - npm (for frontend build)
-#   - Root privileges (for systemd install; non-root for manual start)
+#   - Python 3.12+ (pre-installed)
+#   - Node.js 20.19+ + npm (pre-installed, for frontend build)
+#   - nginx (pre-installed, for HTTPS reverse proxy)
 # =============================================================================
 
 set -euo pipefail
@@ -33,54 +26,143 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-INSTALL_DIR=""
-INSTALL_SERVICE=""
-
-# ─── Parse args ──────────────────────────────────────────────────────────────
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --dir=*)
-            INSTALL_DIR="${1#*=}"
-            shift
-            ;;
-        --service)
-            INSTALL_SERVICE=true
-            shift
-            ;;
-        --no-service)
-            INSTALL_SERVICE=false
-            shift
-            ;;
-        --help|-h)
-            echo "Usage: $0 [options]"
+# ─── Parse arguments ──────────────────────────────────────────────────────────
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            echo "Usage: $0"
             echo ""
-            echo "Options:"
-            echo "  --dir=PATH           Install directory (default: /opt/orchestration-center)"
-            echo "  --service            Install as systemd service (requires root)"
-            echo "  --no-service         Do not install as systemd service (manual start)"
+            echo "Finds the offline tarball (produced by pack_orc.sh),"
+            echo "extracts it, sets up venv, installs deps from local wheels,"
+            echo "builds frontend, configures nginx HTTPS, and starts the service."
             echo ""
-            echo "Without --service or --no-service, you will be prompted."
-            echo ""
-            echo "Architecture is auto-detected (x86_64 or aarch64). No flag needed."
+            echo "Prerequisites: Python 3.12+, Node.js 20.19+, npm, nginx"
             exit 0
             ;;
         *)
-            echo -e "${RED}Unknown option: $1${NC}"
+            echo -e "${RED}Unknown option: $arg${NC}"
+            echo "Run '$0 --help' for usage."
             exit 1
             ;;
     esac
 done
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  Offline Bundle Installer${NC}"
-echo -e "${BLUE}  Orchestration Center${NC}"
+echo -e "${BLUE}  Orchestration Center - One-Click Installer${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# ─── Step 1: Detect architecture ─────────────────────────────────────────────
-echo -e "${YELLOW}Step 1: Detecting system architecture...${NC}"
+# ─── Helper: run a command with sudo if not root ──────────────────────────────
+run_sudo() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+# ─── Helper: kill any process listening on a given TCP port ───────────────────
+free_port() {
+    local port="$1"
+    local pids=""
+    if command -v fuser >/dev/null 2>&1; then
+        pids="$(fuser "${port}/tcp" 2>/dev/null)" || true
+    elif command -v lsof >/dev/null 2>&1; then
+        pids="$(lsof -t -i:"${port}" 2>/dev/null)" || true
+    elif command -v ss >/dev/null 2>&1; then
+        pids="$(ss -tlnp 2>/dev/null | grep ":${port}\b" | grep -oE 'pid=[0-9]+' | cut -d= -f2)" || true
+    fi
+    if [ -n "${pids}" ]; then
+        echo -e "${YELLOW}  Port ${port} is in use, killing PID(s): ${pids}...${NC}"
+        echo "${pids}" | tr ' ' '\n' | xargs -r kill 2>/dev/null || true
+        sleep 1
+        echo "${pids}" | tr ' ' '\n' | xargs -r kill -9 2>/dev/null || true
+    fi
+}
+
+# ─── Helper: find nginx binary path ───────────────────────────────────────────
+find_nginx_binary() {
+    local nginx_bin
+    if nginx_bin=$(command -v nginx 2>/dev/null); then
+        echo "$nginx_bin"
+        return 0
+    fi
+    for dir in /usr/sbin /sbin; do
+        if [ -x "${dir}/nginx" ]; then
+            echo "${dir}/nginx"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ─── Step 1: Find tarball ────────────────────────────────────────────────────
+echo -e "${YELLOW}Step 1: Finding offline package...${NC}"
+
+TARBALL=""
+for f in "${SCRIPT_DIR}"/orchestration-center-offline-*.tar.gz; do
+    if [ -f "$f" ]; then
+        TARBALL="$f"
+        break
+    fi
+done
+# Also check dist/ subdirectory
+if [ -z "$TARBALL" ]; then
+    for f in "${SCRIPT_DIR}"/dist/orchestration-center-offline-*.tar.gz; do
+        if [ -f "$f" ]; then
+            TARBALL="$f"
+            break
+        fi
+    done
+fi
+
+if [ -z "$TARBALL" ]; then
+    echo -e "${RED}Error: No orchestration-center tarball found.${NC}"
+    echo "       Searched: ${SCRIPT_DIR}/orchestration-center-offline-*.tar.gz"
+    echo "       Searched: ${SCRIPT_DIR}/dist/orchestration-center-offline-*.tar.gz"
+    echo "       Please run pack_orc.sh first to build the offline package."
+    exit 1
+fi
+echo -e "  ${GREEN}✓${NC} Found: ${TARBALL}"
+
+PKG_NAME=$(basename "$TARBALL" .tar.gz)
+
+# ─── Step 2: Extract ─────────────────────────────────────────────────────────
+echo -e "${YELLOW}Step 2: Extracting package...${NC}"
+
+EXTRACT_DIR="${SCRIPT_DIR}/${PKG_NAME}"
+
+if [ -d "$EXTRACT_DIR" ]; then
+    echo -e "${YELLOW}  Directory already exists: ${EXTRACT_DIR}${NC}"
+    read -p "  Overwrite? (y/n): " choice
+    case "$choice" in
+        [Yy]|[Yy][Ee][Ss])
+            rm -rf "$EXTRACT_DIR"
+            tar -xzf "$TARBALL" -C "$SCRIPT_DIR"
+            echo -e "  ${GREEN}✓${NC} Extracted (overwritten)."
+            ;;
+        *)
+            echo -e "  ${GREEN}✓${NC} Using existing directory."
+            ;;
+    esac
+else
+    tar -xzf "$TARBALL" -C "$SCRIPT_DIR"
+    echo -e "  ${GREEN}✓${NC} Extracted to: ${EXTRACT_DIR}"
+fi
+
+# Set paths relative to extracted directory
+ROOT_DIR="$EXTRACT_DIR"
+WHEELS_DIR="${ROOT_DIR}/vendor/wheels"
+NPM_CACHE_DIR="${ROOT_DIR}/vendor/npm-cache"
+FRONTEND_DIR="${ROOT_DIR}/workflow-designer"
+VENV_DIR="${ROOT_DIR}/venv"
+REQUIREMENTS_FILE="${ROOT_DIR}/requirements.txt"
+
+cd "$ROOT_DIR"
+
+# ─── Step 3: Detect architecture and verify bundle ───────────────────────────
+echo -e "${YELLOW}Step 3: Detecting system architecture and verifying bundle...${NC}"
 
 RAW_ARCH="$(uname -m)"
 case "$RAW_ARCH" in
@@ -91,31 +173,16 @@ case "$RAW_ARCH" in
         NORMALIZED_ARCH="aarch64"
         ;;
     *)
-        echo -e "${RED}Error: Unsupported architecture '$RAW_ARCH'. Supported: x86_64, aarch64.${NC}"
+        echo -e "${RED}Error: Unsupported architecture '${RAW_ARCH}'. Supported: x86_64, aarch64.${NC}"
         exit 1
         ;;
 esac
 echo -e "  ${GREEN}✓${NC} Detected: ${RAW_ARCH} → ${NORMALIZED_ARCH}"
-echo ""
-
-# ─── Step 2: Verify bundle integrity ─────────────────────────────────────────
-echo -e "${YELLOW}Step 2: Verifying bundle...${NC}"
-
-if [ ! -f "${ROOT_DIR}/OFFLINE_BUNDLE_MANIFEST.txt" ]; then
-    echo -e "${RED}Error: Not running from inside the offline bundle.${NC}"
-    echo -e "       Expected to find OFFLINE_BUNDLE_MANIFEST.txt in project root."
-    echo -e "       Run this script from: orchestration-center-offline/bin/install_offline.sh"
-    exit 1
-fi
-
-WHEELS_DIR="${ROOT_DIR}/vendor/wheels"
-NPM_CACHE_DIR="${ROOT_DIR}/vendor/npm-cache"
-FRONTEND_DIR="${ROOT_DIR}/workflow-designer"
 
 # Check wheels directory
 if [ ! -d "$WHEELS_DIR" ]; then
     echo -e "${RED}Error: Wheels directory not found at $WHEELS_DIR${NC}"
-    echo -e "       The bundle may be incomplete."
+    echo "       The bundle may be incomplete."
     exit 1
 fi
 
@@ -128,106 +195,104 @@ fi
 # Verify wheels exist for the detected architecture
 ARCH_WHEELS=$(find "$WHEELS_DIR" -name "*.whl" 2>/dev/null | grep -i "$NORMALIZED_ARCH" | head -1)
 if [ -z "$ARCH_WHEELS" ]; then
-    echo -e "${RED}Error: No wheels found for architecture '${NORMALIZED_ARCH}' in wheels/ directory.${NC}"
-    echo -e "       This package may be incomplete. Re-run the packager to download both architectures."
+    echo -e "${RED}Error: No wheels found for architecture '${NORMALIZED_ARCH}'.${NC}"
+    echo "       This package may be incomplete. Re-run pack_orc.sh to download both architectures."
     exit 1
 fi
-
-echo -e "  ${GREEN}✓${NC} ${WHEEL_COUNT} wheel packages found (${NORMALIZED_ARCH} wheels confirmed)"
+echo -e "  ${GREEN}✓${NC} ${WHEEL_COUNT} wheel packages found (${NORMALIZED_ARCH} confirmed)"
 
 # Check npm cache
-if [ -d "$FRONTEND_DIR" ]; then
-    if [ ! -d "$NPM_CACHE_DIR" ]; then
-        echo -e "  ${YELLOW}⚠ npm cache not found, frontend will not be available.${NC}"
-    else
-        echo -e "  ${GREEN}✓${NC} npm cache found"
-    fi
+if [ -d "$FRONTEND_DIR" ] && [ ! -d "$NPM_CACHE_DIR" ]; then
+    echo -e "  ${YELLOW}⚠ npm cache not found, frontend will not be available.${NC}"
+elif [ -d "$NPM_CACHE_DIR" ]; then
+    echo -e "  ${GREEN}✓${NC} npm cache found"
 fi
 
+# Create runtime directories (not included in the bundle)
+mkdir -p "${ROOT_DIR}/log" "${ROOT_DIR}/run"
+
 echo -e "  ${GREEN}✓${NC} Bundle verified"
-echo ""
 
-# ─── Step 3: Check system Python ─────────────────────────────────────────────
-echo -e "${YELLOW}Step 3: Checking system Python...${NC}"
+# ─── Step 4: Check Python ────────────────────────────────────────────────────
+echo -e "${YELLOW}Step 4: Checking Python...${NC}"
 
-# Auto-detect Python 3.12+ — try common binary names in order of preference
-PYTHON_BIN=""
-for candidate in python3.13 python3.12 python3.11 python3; do
+PYTHON_CMD=""
+for candidate in python3.13 python3.12 python3; do
     if command -v "$candidate" &>/dev/null; then
         CAND_VERSION=$("$candidate" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
         CAND_MAJOR=$(echo "$CAND_VERSION" | cut -d. -f1)
         CAND_MINOR=$(echo "$CAND_VERSION" | cut -d. -f2)
         if [ "$CAND_MAJOR" -eq 3 ] && [ "$CAND_MINOR" -ge 12 ]; then
-            PYTHON_BIN="$candidate"
+            PYTHON_CMD="$candidate"
             SYSTEM_PY="$CAND_VERSION"
             break
         fi
     fi
 done
 
-if [ -z "$PYTHON_BIN" ]; then
-    echo -e "${RED}Error: Python 3.12+ not found on this machine.${NC}"
-    echo -e "       Searched: python3.13, python3.12, python3.11, python3"
-    echo -e "       The project requires Python 3.12+."
+if [ -z "$PYTHON_CMD" ]; then
+    echo -e "${RED}Error: Python 3.12+ not found.${NC}"
+    echo "       Searched: python3.13, python3.12, python3"
+    echo "       Please install Python 3.12+ and try again."
     exit 1
 fi
-echo -e "  ${GREEN}✓${NC} System Python: ${SYSTEM_PY} ($PYTHON_BIN)"
-echo ""
+echo -e "  ${GREEN}✓${NC} Python ${SYSTEM_PY} ($PYTHON_CMD)"
 
-# ─── Step 4: Determine install directory ─────────────────────────────────────
-if [ -z "$INSTALL_DIR" ]; then
-    INSTALL_DIR="${ROOT_DIR}"
-    echo -e "${YELLOW}Step 4: Install location${NC}"
-    echo -e "  Bundle is at: ${ROOT_DIR}"
-    echo -e "  You can run directly from here, or install to a system path."
-    echo ""
-    read -p "$(echo -e "${YELLOW}Install to /opt/orchestration-center? (y/n): ${NC}")" choice
-    case "$choice" in
-        [Yy]|[Yy][Ee][Ss])
-            INSTALL_DIR="/opt/orchestration-center"
-            ;;
-        *)
-            INSTALL_DIR="${ROOT_DIR}"
-            echo -e "  ${GREEN}✓${NC} Running in-place from ${INSTALL_DIR}"
-            ;;
-    esac
-else
-    echo -e "${YELLOW}Step 4: Install location${NC}"
-    echo -e "  Install directory: ${INSTALL_DIR}"
+# ─── Step 5: Check Node.js, npm, and nginx ───────────────────────────────────
+echo -e "${YELLOW}Step 5: Checking Node.js, npm, and nginx...${NC}"
+
+# Check Node.js 20.19+
+if ! command -v node &>/dev/null; then
+    echo -e "${RED}Error: Node.js not found. Need Node.js 20.19+.${NC}"
+    echo "       Please install Node.js 20.19+ and try again."
+    exit 1
 fi
-echo ""
-
-# ─── Step 5: Copy to install directory if different ──────────────────────────
-if [ "$INSTALL_DIR" != "$ROOT_DIR" ]; then
-    echo -e "${YELLOW}Step 5: Copying to ${INSTALL_DIR}...${NC}"
-
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${YELLOW}⚠ Not running as root. Need sudo to copy to ${INSTALL_DIR}.${NC}"
-        SUDO="sudo"
-    else
-        SUDO=""
-    fi
-
-    $SUDO mkdir -p "$INSTALL_DIR"
-    $SUDO cp -r "$ROOT_DIR"/* "$INSTALL_DIR/"
-    echo -e "  ${GREEN}✓${NC} Installed to ${INSTALL_DIR}"
-
-    ROOT_DIR="$INSTALL_DIR"
-    WHEELS_DIR="${INSTALL_DIR}/vendor/wheels"
-    NPM_CACHE_DIR="${INSTALL_DIR}/vendor/npm-cache"
-    FRONTEND_DIR="${INSTALL_DIR}/workflow-designer"
-    VENV_DIR="${INSTALL_DIR}/venv"
-else
-    VENV_DIR="${ROOT_DIR}/venv"
-    echo -e "${YELLOW}Step 5: Running in-place, no copy needed${NC}"
+NODE_VERSION=$(node --version | sed 's/v//')
+NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
+NODE_MINOR=$(echo "$NODE_VERSION" | cut -d. -f2)
+if [ "$NODE_MAJOR" -lt 20 ] || { [ "$NODE_MAJOR" -eq 20 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
+    echo -e "${RED}Error: Node.js 20.19+ required, found v${NODE_VERSION}.${NC}"
+    exit 1
 fi
+echo -e "  ${GREEN}✓${NC} Node.js v${NODE_VERSION}"
+
+# Check npm
+if ! command -v npm &>/dev/null; then
+    echo -e "${RED}Error: npm not found. Need npm for frontend build.${NC}"
+    echo "       Please install npm and try again."
+    exit 1
+fi
+NPM_VERSION=$(npm --version)
+echo -e "  ${GREEN}✓${NC} npm ${NPM_VERSION}"
+
+# Check nginx (must be pre-installed on the offline machine)
+if ! find_nginx_binary >/dev/null 2>&1; then
+    echo -e "${RED}Error: nginx not found.${NC}"
+    echo "       nginx is required for HTTPS reverse proxy and frontend serving."
+    echo "       Please install nginx and try again."
+    exit 1
+fi
+NGINX_BIN=$(find_nginx_binary)
+echo -e "  ${GREEN}✓${NC} nginx $("$NGINX_BIN" -v 2>&1 | awk '{print $3}')"
+
+# Check openssl (for SSL certificate generation)
+if ! command -v openssl &>/dev/null; then
+    echo -e "${YELLOW}  ⚠ openssl not found; SSL certificate generation may fail.${NC}"
+else
+    echo -e "  ${GREEN}✓${NC} openssl $(openssl version 2>/dev/null | awk '{print $2}')"
+fi
+
 echo ""
 
-# ─── Step 6: Build Python venv from wheels ───────────────────────────────────
+# ─── Step 6: Create venv and install dependencies ────────────────────────────
 echo -e "${YELLOW}Step 6: Building Python venv from wheels...${NC}"
 
-rm -rf "$VENV_DIR"
-"$PYTHON_BIN" -m venv "$VENV_DIR"
+if [ -d "$VENV_DIR" ]; then
+    echo -e "${YELLOW}  venv already exists, recreating...${NC}"
+    rm -rf "$VENV_DIR"
+fi
+
+"$PYTHON_CMD" -m venv "$VENV_DIR"
 echo -e "  ${GREEN}✓${NC} venv created at ${VENV_DIR}"
 
 # Upgrade pip from local wheels
@@ -235,94 +300,230 @@ echo -e "  ${GREEN}✓${NC} venv created at ${VENV_DIR}"
 
 # Install dependencies from local wheels (no internet needed)
 echo -e "  ${YELLOW}Installing dependencies from wheels (this may take a moment)...${NC}"
-"${VENV_DIR}/bin/pip" install --no-index --find-links "$WHEELS_DIR" \
-    -r "${ROOT_DIR}/requirements.txt"
+if ! "${VENV_DIR}/bin/pip" install --no-index --find-links "$WHEELS_DIR" \
+    -r "$REQUIREMENTS_FILE" 2>&1 | sed 's/^/  /'; then
+    echo -e "${RED}Error: Failed to install dependencies.${NC}"
+    echo "       Some wheels may be missing for your platform."
+    exit 1
+fi
 echo -e "  ${GREEN}✓${NC} Python dependencies installed"
 echo ""
 
-# ─── Step 7: Build frontend from npm cache ───────────────────────────────────
+# ─── Step 7: Build frontend and deploy static assets ─────────────────────────
+echo -e "${YELLOW}Step 7: Building frontend from npm cache...${NC}"
+
 if [ -d "$FRONTEND_DIR" ] && [ -d "$NPM_CACHE_DIR" ]; then
-    echo -e "${YELLOW}Step 7: Building frontend from npm cache...${NC}"
+    cd "$FRONTEND_DIR"
 
-    if ! command -v npm &>/dev/null; then
-        echo -e "${RED}Error: npm not found on this machine.${NC}"
-        echo -e "${YELLOW}Frontend will not be available. Install Node.js 20.19+ and npm.${NC}"
-    else
-        cd "$FRONTEND_DIR"
-        npm install --force --cache "$NPM_CACHE_DIR" --prefer-offline
-        echo -e "  ${GREEN}✓${NC} Frontend built from cache"
+    echo -e "  ${YELLOW}Running npm install (offline, from cache)...${NC}"
+    npm install --force --cache "$NPM_CACHE_DIR" --prefer-offline 2>&1 | sed 's/^/  /' || {
+        echo -e "${RED}Error: npm install failed.${NC}"
+        echo "       The npm cache may be incomplete."
         cd "$ROOT_DIR"
-    fi
+        exit 1
+    }
+    echo -e "  ${GREEN}✓${NC} Frontend dependencies installed"
+
+    echo -e "  ${YELLOW}Building frontend static assets...${NC}"
+    npm run build > "${ROOT_DIR}/log/frontend-build.log" 2>&1 || {
+        echo -e "${RED}Error: Frontend build failed.${NC}"
+        echo "       Check log: ${ROOT_DIR}/log/frontend-build.log"
+        cd "$ROOT_DIR"
+        exit 1
+    }
+    echo -e "  ${GREEN}✓${NC} Frontend built to dist/"
+
+    # Deploy static assets to system web directory (see ADR-014)
+    # nginx (www-data) cannot traverse user home directory, so we copy dist/
+    # to /var/www/openan/ with world-readable permissions.
+    echo -e "  ${YELLOW}Deploying static assets to /var/www/openan/...${NC}"
+    run_sudo mkdir -p /var/www/openan
+    run_sudo cp -r "${FRONTEND_DIR}/dist/"* /var/www/openan/
+    run_sudo chmod -R 755 /var/www/openan
+    echo -e "  ${GREEN}✓${NC} Static assets deployed to /var/www/openan/"
+
+    cd "$ROOT_DIR"
 else
-    echo -e "${YELLOW}Step 7: Frontend not available (no npm cache or no frontend dir)${NC}"
+    echo -e "${YELLOW}  Frontend not available (no npm cache or no frontend dir)${NC}"
 fi
 echo ""
 
-# ─── Make scripts executable ─────────────────────────────────────────────────
-chmod +x "${ROOT_DIR}/bin/"*.sh 2>/dev/null || true
+# ─── Step 8: Auto-configure server.conf ──────────────────────────────────────
+echo -e "${YELLOW}Step 8: Auto-configuring server.conf...${NC}"
 
-# ─── Prompt for systemd service install ──────────────────────────────────────
-if [ -z "$INSTALL_SERVICE" ]; then
-    echo -e "${YELLOW}Step 8: systemd service${NC}"
-    read -p "$(echo -e "${YELLOW}Install as systemd service? (y/n): ${NC}")" choice
-    case "$choice" in
-        [Yy]|[Yy][Ee][Ss]) INSTALL_SERVICE=true ;;
-        *) INSTALL_SERVICE=false ;;
-    esac
+SERVER_CONF="${ROOT_DIR}/etc/conf/server.conf"
+if [ -f "$SERVER_CONF" ]; then
+    # Fix agent_registry_url: convert https to http for local registry connection
+    # (see memory: orchestration-center connecting to registry-center needs HTTP)
+    sed -i 's|agent_registry_url=https://|agent_registry_url=http://|' "$SERVER_CONF"
+    echo -e "  ${GREEN}✓${NC} agent_registry_url set to http (local registry)"
+
+    echo -e "  ${YELLOW}Note: Default agent_registry_url is http://127.0.0.1:5000${NC}"
+    echo -e "  ${YELLOW}      If registry-center is on a different host, edit:${NC}"
+    echo -e "  ${YELLOW}      ${SERVER_CONF}${NC}"
+else
+    echo -e "${YELLOW}  ⚠ server.conf not found, skipping auto-config${NC}"
 fi
+echo ""
 
-if [ "$INSTALL_SERVICE" = true ]; then
-    echo -e "${YELLOW}Installing systemd service...${NC}"
+# ─── Step 9: Configure nginx (HTTPS reverse proxy) ───────────────────────────
+echo -e "${YELLOW}Step 9: Configuring nginx...${NC}"
 
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${YELLOW}⚠ Need root for systemd. Using sudo...${NC}"
-        SUDO="sudo"
+# Generate self-signed SSL certificate for HTTPS
+NGINX_SSL_DIR="/etc/nginx/ssl"
+if [ ! -f "${NGINX_SSL_DIR}/cert.pem" ] || [ ! -f "${NGINX_SSL_DIR}/key.pem" ]; then
+    echo -e "  ${YELLOW}Generating self-signed SSL certificate...${NC}"
+    run_sudo mkdir -p "${NGINX_SSL_DIR}"
+    run_sudo openssl req -x509 -nodes -days 365 \
+        -newkey rsa:2048 \
+        -keyout "${NGINX_SSL_DIR}/key.pem" \
+        -out "${NGINX_SSL_DIR}/cert.pem" \
+        -subj "/CN=localhost" 2>/dev/null
+    if [ -f "${NGINX_SSL_DIR}/cert.pem" ] && [ -f "${NGINX_SSL_DIR}/key.pem" ]; then
+        echo -e "  ${GREEN}✓${NC} SSL certificate generated at ${NGINX_SSL_DIR}"
     else
-        SUDO=""
+        echo -e "${RED}Error: Failed to generate SSL certificate.${NC}"
+        exit 1
     fi
-
-    # Use the bundled install_service.sh, passing --no-deps since venv is pre-built
-    $SUDO "${ROOT_DIR}/bin/install_service.sh" install --dir="$INSTALL_DIR" --no-deps
-    echo ""
 else
-    echo -e "${YELLOW}Step 8: Skipping systemd service${NC}"
-    echo -e "  You can start manually with: ${ROOT_DIR}/bin/start.sh"
-    echo ""
+    echo -e "  ${GREEN}✓${NC} SSL certificate already exists at ${NGINX_SSL_DIR}"
 fi
 
-# ─── Print configuration guide ───────────────────────────────────────────────
-echo -e "${BLUE}========================================${NC}"
-echo -e "${GREEN}  Installation complete!${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-echo -e "${YELLOW}IMPORTANT: Before starting, configure these files:${NC}"
-echo ""
-echo -e "  ${GREEN}1. Backend config:${NC} ${ROOT_DIR}/etc/conf/server.conf"
-echo -e "     - ip, port, enable_https, ssl_certfile, ssl_keyfile"
-echo -e "     - access_password, persistence_mode, agent_registry_url"
-echo ""
-echo -e "  ${GREEN}2. LLM config:${NC}    ${ROOT_DIR}/common/config/llm_config.json"
-echo -e "     - chat.api_key, chat.url, chat.model"
-echo -e "     - embed/rerank settings (if used)"
-echo ""
-echo -e "  ${GREEN}3. Database config:${NC} ${ROOT_DIR}/etc/conf/db_config.json"
-echo -e "     - host, port, user, password (only if persistence_mode=postgresql)"
-echo ""
-echo -e "  ${GREEN}4. TLS properties:${NC} ${ROOT_DIR}/etc/conf/server.properties"
-echo -e "     - tls.version, tls.cipher, connection limits"
-echo ""
-echo -e "  ${GREEN}5. SSL certs:${NC}     ${ROOT_DIR}/etc/ssl/"
-echo -e "     - server.cer, server_key.pem, trust.cer, cert_pwd"
-echo -e "     - Generate self-signed: python generate_selfsign_cert.py etc/ssl serverAuth"
-echo ""
-echo -e "  See: bin/OFFLINE_CONFIG_GUIDE.md for detailed instructions"
-echo ""
-echo -e "${YELLOW}To start:${NC}"
-if [ "$INSTALL_SERVICE" = true ]; then
-    echo -e "  sudo systemctl start orchestration-center"
-    echo -e "  sudo systemctl status orchestration-center"
+# Generate nginx configuration file
+echo -e "  ${YELLOW}Generating nginx configuration...${NC}"
+NGINX_CONF_LOCAL="${ROOT_DIR}/log/openan-nginx.conf"
+cat > "$NGINX_CONF_LOCAL" << 'NGINX_EOF'
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+    # Frontend (static files served from /var/www/openan, see ADR-014)
+    location / {
+        root /var/www/openan;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Orchestration backend API (trailing slash strips /api/orchestrate prefix)
+    location /api/orchestrate/ {
+        proxy_pass http://127.0.0.1:5001/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Registry Center (trailing slash strips /registry prefix)
+    location /registry/ {
+        proxy_pass http://127.0.0.1:5000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+NGINX_EOF
+
+# Deploy configuration to nginx conf.d
+NGINX_CONF_DEST="/etc/nginx/conf.d/openan.conf"
+run_sudo cp "$NGINX_CONF_LOCAL" "$NGINX_CONF_DEST"
+echo -e "  ${GREEN}✓${NC} Configuration deployed to ${NGINX_CONF_DEST}"
+
+# Remove default site if it conflicts (Debian/Ubuntu ships a default server on port 80)
+if [ -f /etc/nginx/sites-enabled/default ]; then
+    echo -e "  ${YELLOW}Removing default nginx site to avoid conflicts...${NC}"
+    run_sudo rm -f /etc/nginx/sites-enabled/default
+fi
+
+# Test nginx configuration
+echo -e "  ${YELLOW}Validating nginx configuration...${NC}"
+if run_sudo "$NGINX_BIN" -t 2>&1; then
+    echo -e "  ${GREEN}✓${NC} nginx configuration is valid."
 else
-    echo -e "  ${ROOT_DIR}/bin/start.sh"
-    echo -e "  (frontend: cd ${ROOT_DIR}/workflow-designer && npm run dev)"
+    echo -e "${RED}Error: nginx configuration test failed.${NC}"
+    exit 1
 fi
 echo ""
+
+# ─── Step 10: Start services ─────────────────────────────────────────────────
+echo -e "${YELLOW}Step 10: Starting services...${NC}"
+
+# Free ports if occupied by previous processes
+free_port 5001
+free_port 443
+
+# Start orchestration-center backend (port 5001)
+echo -e "  ${YELLOW}Starting orchestration-center backend (http://127.0.0.1:5001)...${NC}"
+cd "$ROOT_DIR"
+
+# Set AGENT_REGISTRY_URL for the backend process
+# Default to local registry-center; user can edit server.conf to change
+export AGENT_REGISTRY_URL="http://127.0.0.1:5000"
+
+nohup "${VENV_DIR}/bin/python" -m orchestrate.start > "${ROOT_DIR}/log/backend.log" 2>&1 &
+OC_BACKEND_PID=$!
+sleep 2
+
+if kill -0 "$OC_BACKEND_PID" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} Backend started (PID: ${OC_BACKEND_PID})"
+else
+    echo -e "${RED}  Error: Backend failed to start.${NC}"
+    echo "  Check log: ${ROOT_DIR}/log/backend.log"
+    exit 1
+fi
+
+# Start nginx (HTTPS reverse proxy on port 443)
+echo -e "  ${YELLOW}Starting nginx (https://localhost)...${NC}"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active nginx >/dev/null 2>&1; then
+    echo -e "  ${YELLOW}nginx is already running, reloading configuration...${NC}"
+    run_sudo "$NGINX_BIN" -s reload 2>/dev/null || true
+elif command -v systemctl >/dev/null 2>&1; then
+    run_sudo systemctl start nginx 2>/dev/null || run_sudo "$NGINX_BIN"
+else
+    run_sudo "$NGINX_BIN" 2>/dev/null || true
+fi
+sleep 1
+
+NGINX_PID="$(pgrep -f 'nginx: master' 2>/dev/null | head -1)" || NGINX_PID=""
+if [ -n "$NGINX_PID" ]; then
+    echo -e "  ${GREEN}✓${NC} nginx started (PID: ${NGINX_PID})"
+else
+    echo -e "${YELLOW}  ⚠ Could not determine nginx master PID.${NC}"
+fi
+
+# ─── Summary ─────────────────────────────────────────────────────────────────
+VPS_IP="$(hostname -I 2>/dev/null | awk '{print $1}')" || VPS_IP=""
+[ -z "${VPS_IP}" ] && VPS_IP="localhost"
+
+echo ""
+echo -e "${BLUE}========================================${NC}"
+echo -e "${GREEN}  Orchestration Center installed and started!${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo ""
+echo "  Frontend:        https://${VPS_IP}"
+echo "  Backend API:     http://127.0.0.1:5001"
+echo "  Backend PID:     ${OC_BACKEND_PID}"
+if [ -n "$NGINX_PID" ]; then
+    echo "  nginx PID:       ${NGINX_PID}"
+fi
+echo "  Directory:       ${ROOT_DIR}"
+echo ""
+echo "  Logs:"
+echo "    Backend:       ${ROOT_DIR}/log/backend.log"
+echo "    Frontend build: ${ROOT_DIR}/log/frontend-build.log"
+echo ""
+echo "  To stop:"
+echo "    kill ${OC_BACKEND_PID}"
+if [ -n "$NGINX_PID" ]; then
+    echo "    nginx: sudo systemctl stop nginx  (or: sudo ${NGINX_BIN} -s stop)"
+fi
+echo ""
+echo -e "${YELLOW}  Configuration files (edit and restart if needed):${NC}"
+echo "    ${ROOT_DIR}/etc/conf/server.conf"
+echo "    ${ROOT_DIR}/common/config/llm_config.json"
+echo "    ${ROOT_DIR}/etc/conf/db_config.json  (if persistence_mode=postgresql)"
+echo ""
+echo -e "${YELLOW}  Note: agent_registry_url defaults to http://127.0.0.1:5000${NC}"
+echo -e "${YELLOW}  If registry-center is remote, edit server.conf and restart.${NC}"
+echo ""
+echo -e "${BLUE}========================================${NC}"
