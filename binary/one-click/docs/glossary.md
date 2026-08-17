@@ -494,3 +494,38 @@ Node.js，但仅用于构建阶段（见 ADR-014）。
 `www-data` 用户运行，无法穿越用户 home 目录（权限 750/700）读取 dist 文件，
 导致 Permission denied（500）。卸载时通过 `rm -rf /var/www/openan` 清理
 （见 ADR-014）。
+
+## 源码 Tarball 下载 (Source Tarball Download)
+
+pack 脚本（`pack_reg.sh`、`pack_orc.sh`）获取应用源码的方式（ADR-016）。从 GitHub
+release 下载源码 tarball（`https://github.com/project-openan/{component}/archive/
+refs/tags/v1.0.0.tar.gz`），用 `curl -fsSL` 下载、`tar --strip-components=1` 解压
+到打包目录。与 `openan_install.sh` Step 1 的源码下载模式完全一致。替代了原先
+假设源码已存在于本地（`ROOT_DIR/`）的 `cp -r` 复制方式。每次打包都重新下载，
+不缓存源码。
+
+## ROOT_DIR 去源码化 (ROOT_DIR Decoupling)
+
+ADR-016 中对 pack 脚本 `ROOT_DIR` 变量的重构。原设计中 `ROOT_DIR = SCRIPT_DIR/..`
+被用作应用源码根目录，pack 脚本通过 `cp -r "${ROOT_DIR}/agent_registry"` 等命令
+复制源码。但部署仓库（`openan-deployment`）的 `binary/` 目录不包含应用源码，
+导致 `cp: cannot stat` 错误。ADR-016 移除了 `ROOT_DIR` 变量，源码改为从 GitHub
+tarball 下载，`ROOT_DIR` 的其他用途（默认输出目录、tarball 输出路径、cd 回原目录）
+替换为 `SCRIPT_DIR`。
+
+## 部署仓库与应用仓库分离 (Deployment/App Repo Separation)
+
+`openan-deployment` 仓库是部署专用仓库，仅包含部署脚本（`one-click/`、
+`orchestration-center/`、`registry-center/`）。应用源码托管在独立的 GitHub
+仓库中：`project-openan/registry-center` 和 `project-openan/orchestration-center`。
+pack 脚本和 one-click 安装脚本都需要从 GitHub 下载应用源码 tarball，不能假设
+源码已存在于部署仓库本地。此分离是 ADR-016 中 pack 脚本改为 tarball 下载的
+根本原因。
+
+## 临时打包 Venv (Temporary Packaging Venv)
+
+`pack_reg.sh` 中用于 `pip download` 的临时虚拟环境（ADR-016）。创建在
+`mktemp -d /tmp/pack-reg-venv-XXXXXX` 中，脚本退出时通过 `trap` 自动清理。
+替代了原先创建在 `ROOT_DIR/.venv` 中的持久化 venv（需要“已存在则重建”逻辑）。
+临时 venv 每次都是干净的，不存在状态残留问题。`pack_orc.sh` 的打包 venv
+位于 `BUILD_DIR/.packaging-venv`，随 `BUILD_DIR` 一起在每次打包时清理。

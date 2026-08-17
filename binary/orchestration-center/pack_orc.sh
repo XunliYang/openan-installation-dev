@@ -1,24 +1,25 @@
 #!/bin/bash
 # =============================================================================
-# pack_offline_bundle.sh
+# pack_orc.sh
 # =============================================================================
 # Run this on the ONLINE machine to build a self-contained offline deployment
 # package for the Orchestration Center.
 #
 # The resulting tarball contains:
-#   - Full project source code
+#   - Full project source code (downloaded from GitHub release)
 #   - Pre-downloaded Python wheels (x86_64 + aarch64, for offline venv build)
 #   - npm cache (for offline frontend build on the target machine)
 #   - Config templates (user edits these on the air-gapped machine)
 #
 # Usage:
-#   ./scripts/pack_offline_bundle.sh
+#   ./pack_orc.sh
 #
 # Prerequisites on the online machine:
 #   - Python 3.12+
 #   - Node.js 20.19+
 #   - npm
-#   - Internet access (for pip download and npm install)
+#   - curl, tar (for source download and extraction)
+#   - Internet access (for source download, pip download and npm install)
 # =============================================================================
 
 set -euo pipefail
@@ -30,9 +31,13 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Source code download (see ADR-016)
+SOURCE_URL="https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz"
+SOURCE_VERSION="v1.0.0"
+
 BUNDLE_NAME="orchestration-center-offline"
-BUILD_DIR="${ROOT_DIR}/.offline-build"
+BUILD_DIR="${SCRIPT_DIR}/.offline-build"
 BUNDLE_DIR="${BUILD_DIR}/${BUNDLE_NAME}"
 
 # ─── Parse args ──────────────────────────────────────────────────────────────
@@ -101,6 +106,18 @@ fi
 NPM_VERSION=$(npm --version)
 echo -e "  ${GREEN}✓${NC} npm ${NPM_VERSION}"
 
+# Check curl and tar (required for source download)
+if ! command -v curl &>/dev/null; then
+    echo -e "${RED}Error: curl not found. Required to download source code.${NC}"
+    exit 1
+fi
+echo -e "  ${GREEN}✓${NC} curl (for source download)"
+if ! command -v tar &>/dev/null; then
+    echo -e "${RED}Error: tar not found. Required to extract source code.${NC}"
+    exit 1
+fi
+echo -e "  ${GREEN}✓${NC} tar (for source extraction)"
+
 echo ""
 
 # ─── Clean previous build ────────────────────────────────────────────────────
@@ -110,10 +127,21 @@ mkdir -p "$BUNDLE_DIR"
 echo -e "  ${GREEN}✓${NC} Build directory ready: $BUNDLE_DIR"
 echo ""
 
-# ─── Copy project source ─────────────────────────────────────────────────────
-echo -e "${YELLOW}Step 2: Copying project source...${NC}"
+# ─── Download project source ───────────────────────────────────────────────
+echo -e "${YELLOW}Step 2: Downloading project source ${SOURCE_VERSION}...${NC}"
 
-# Use rsync to copy, excluding things we don't want in the bundle
+TMP_TAR=$(mktemp /tmp/orchestration-center-source-XXXXXX.tar.gz)
+if ! curl -fsSL "${SOURCE_URL}" -o "${TMP_TAR}"; then
+    echo -e "${RED}Error: Failed to download orchestration-center source ${SOURCE_VERSION}.${NC}"
+    rm -f "${TMP_TAR}"
+    exit 1
+fi
+
+# Extract to a temp source dir, then rsync to bundle dir with excludes
+TMP_SOURCE=$(mktemp -d /tmp/orchestration-center-src-XXXXXX)
+tar -xzf "${TMP_TAR}" -C "${TMP_SOURCE}" --strip-components=1
+rm -f "${TMP_TAR}"
+
 if command -v rsync &>/dev/null; then
     rsync -a \
         --exclude='.git' \
@@ -129,18 +157,19 @@ if command -v rsync &>/dev/null; then
         --exclude='/log/' \
         --exclude='/run/' \
         --exclude='*.log' \
-        "$ROOT_DIR/" "$BUNDLE_DIR/"
+        "$TMP_SOURCE/" "$BUNDLE_DIR/"
 else
     # Fallback: cp + manual cleanup
-    cp -r "$ROOT_DIR"/* "$BUNDLE_DIR/"
-    cp -r "$ROOT_DIR"/.??* "$BUNDLE_DIR/" 2>/dev/null || true
+    cp -r "$TMP_SOURCE"/* "$BUNDLE_DIR/"
+    cp -r "$TMP_SOURCE"/.??* "$BUNDLE_DIR/" 2>/dev/null || true
     rm -rf "$BUNDLE_DIR/.git" "$BUNDLE_DIR/.offline-build"
     find "$BUNDLE_DIR" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
     find "$BUNDLE_DIR" -name '*.pyc' -delete 2>/dev/null || true
     rm -rf "$BUNDLE_DIR/.venv" "$BUNDLE_DIR/venv" "$BUNDLE_DIR/workflow-designer/node_modules"
     rm -rf "$BUNDLE_DIR/.pytest_cache" "$BUNDLE_DIR/.ruff_cache" "$BUNDLE_DIR/.mypy_cache"
 fi
-echo -e "  ${GREEN}✓${NC} Source copied"
+rm -rf "$TMP_SOURCE"
+echo -e "  ${GREEN}✓${NC} Source downloaded and copied"
 echo ""
 
 # ─── Download Python wheels for both architectures ──────────────────────────
@@ -232,7 +261,7 @@ fi
 # Clean up node_modules — not bundled (target machine will rebuild from cache)
 rm -rf "$FRONTEND_DIR/node_modules"
 
-cd "$ROOT_DIR"
+cd "$SCRIPT_DIR"
 echo ""
 
 # ─── Copy in the offline install script ──────────────────────────────────────
@@ -289,12 +318,12 @@ echo ""
 # ─── Create the tarball ──────────────────────────────────────────────────────
 echo -e "${YELLOW}Step 7: Creating tarball...${NC}"
 
-TARBALL="${ROOT_DIR}/${BUNDLE_NAME}-bundle.tar.gz"
+TARBALL="${SCRIPT_DIR}/${BUNDLE_NAME}-bundle.tar.gz"
 
 # Go to build dir parent so the tarball has a clean top-level dir name
 cd "$BUILD_DIR"
 tar czf "$TARBALL" "$BUNDLE_NAME"
-cd "$ROOT_DIR"
+cd "$SCRIPT_DIR"
 
 TARBALL_SIZE=$(du -h "$TARBALL" | cut -f1)
 echo -e "  ${GREEN}✓${NC} Tarball created: $TARBALL ($TARBALL_SIZE)"

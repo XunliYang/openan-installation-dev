@@ -30,7 +30,7 @@
 #### 第一阶段：在联网机器上打包
 
 ```bash
-# 前提条件：Python 3.12+、互联网连接
+# 前提条件：Python 3.12+、curl、tar、互联网连接
 ./pack_reg.sh
 
 # 指定版本号和输出目录
@@ -50,10 +50,13 @@
 打包过程：
 1. 验证 Python 3.12+ 环境
 2. 创建打包用虚拟环境
-3. 复制项目源码
-4. 下载 x86_64 和 aarch64 双架构 wheel 包（支持 manylinux_2_34/2_28/2_17/2014）
-5. 生成 `README_OFFLINE.txt`
-6. 创建 `tar.gz` 压缩包
+3. 准备构建目录
+4. 从 GitHub release 下载项目源码（v1.0.0）
+5. 下载 x86_64 和 aarch64 双架构 wheel 包（支持 manylinux_2_34/2_28/2_17/2014）
+6. 生成 `README_OFFLINE.txt`
+7. 创建 `tar.gz` 压缩包
+
+> **源码说明**：pack 脚本自动从 GitHub 下载应用源码 tarball，无需本地预置源码（见 ADR-016）。
 
 > **架构说明**：离线包同时包含 x86_64 和 aarch64 双架构的 wheel 包。setup 脚本会自动检测离线机器的架构并安装对应的 wheels，无需手动指定。
 
@@ -204,7 +207,7 @@ This directory contains offline deployment scripts for the Registry Center. It u
 #### Phase 1: Package on the Online Machine
 
 ```bash
-# Prerequisites: Python 3.12+, internet access
+# Prerequisites: Python 3.12+, curl, tar, internet access
 ./pack_reg.sh
 
 # Specify version label and output directory
@@ -224,10 +227,13 @@ Supported options:
 Packaging process:
 1. Verify Python 3.12+ environment
 2. Create a packaging virtual environment
-3. Copy project source code
-4. Download wheels for both x86_64 and aarch64 (supports manylinux_2_34/2_28/2_17/2014)
-5. Generate `README_OFFLINE.txt`
-6. Create the `tar.gz` archive
+3. Prepare build directory
+4. Download project source from GitHub release (v1.0.0)
+5. Download wheels for both x86_64 and aarch64 (supports manylinux_2_34/2_28/2_17/2014)
+6. Generate `README_OFFLINE.txt`
+7. Create the `tar.gz` archive
+
+> **Source note**: The pack script automatically downloads the application source tarball from GitHub. No local source code is required (see ADR-016).
 
 > **Architecture note**: The offline package contains wheels for both x86_64 and aarch64. The setup script auto-detects the machine architecture and installs the matching wheels. No manual arch specification needed.
 

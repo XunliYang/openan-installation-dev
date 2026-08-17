@@ -18,15 +18,15 @@
 #    under the License.
 
 # ============================================================================
-# package_offline.sh - Build offline deployment package
+# pack_reg.sh - Build offline deployment package
 #
-# Runs on the ONLINE machine. Downloads wheel packages for both x86_64 and
-# aarch64 architectures and bundles the project into a self-contained tar.gz
-# for air-gapped deploy.
+# Runs on the ONLINE machine. Downloads source code from GitHub release,
+# then downloads wheel packages for both x86_64 and aarch64 architectures,
+# and bundles everything into a self-contained tar.gz for air-gapped deploy.
 #
 # Usage:
-#   ./bin/package_offline.sh [--python-version=3.12]
-#                            [--version=1.0.0] [--output=dist]
+#   ./pack_reg.sh [--python-version=3.12]
+#                 [--version=1.0.0] [--output=dist]
 # ============================================================================
 
 set -euo pipefail
@@ -37,12 +37,15 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Source code download (see ADR-016)
+SOURCE_URL="https://github.com/project-openan/registry-center/archive/refs/tags/v1.0.0.tar.gz"
+SOURCE_VERSION="v1.0.0"
 
 # Defaults
 PYTHON_VERSION="3.12"
 VERSION="1.0.0"
-OUTPUT_DIR="${ROOT_DIR}/dist"
+OUTPUT_DIR="${SCRIPT_DIR}/dist"
 
 usage() {
     echo "Usage: $0 [options]"
@@ -121,44 +124,48 @@ fi
 
 echo "  Found: ${PYTHON_VER} ($PYTHON_CMD)"
 
-# --- Step 2: Create and activate .venv ---
+# Check curl and tar (required for source download)
+command -v curl >/dev/null 2>&1 || { echo -e "${RED}Error: curl is required to download source.${NC}"; exit 1; }
+command -v tar  >/dev/null 2>&1 || { echo -e "${RED}Error: tar is required to extract source.${NC}"; exit 1; }
+echo "  curl and tar available"
+
+# --- Step 2: Create and activate packaging venv ---
 echo -e "${GREEN}[2/7] Creating virtual environment for packaging...${NC}"
 
-VENV_PACKAGING_DIR="${ROOT_DIR}/.venv"
-if [ -d "$VENV_PACKAGING_DIR" ]; then
-    echo -e "${YELLOW}  .venv already exists, recreating...${NC}"
-    rm -rf "$VENV_PACKAGING_DIR"
-fi
+VENV_PACKAGING_DIR=$(mktemp -d /tmp/pack-reg-venv-XXXXXX)
+trap 'rm -rf "$VENV_PACKAGING_DIR"' EXIT
 
 $PYTHON_CMD -m venv "$VENV_PACKAGING_DIR"
 source "${VENV_PACKAGING_DIR}/bin/activate"
 
-echo "  Virtual environment created and activated: ${VENV_PACKAGING_DIR}"
+echo "  Virtual environment created: ${VENV_PACKAGING_DIR}"
 
 # --- Step 3: Prepare build directory ---
 echo -e "${GREEN}[3/7] Preparing build directory...${NC}"
 rm -rf "${OUTPUT_DIR}/build"
 mkdir -p "$BUILD_DIR"
 
-# --- Step 4: Copy project source ---
-echo -e "${GREEN}[4/7] Copying project source...${NC}"
+# --- Step 4: Download project source ---
+echo -e "${GREEN}[4/7] Downloading project source ${SOURCE_VERSION}...${NC}"
 
-# Copy source directories
-cp -r "${ROOT_DIR}/agent_registry" "${BUILD_DIR}/"
-cp -r "${ROOT_DIR}/common" "${BUILD_DIR}/"
-cp -r "${ROOT_DIR}/etc" "${BUILD_DIR}/"
-cp -r "${ROOT_DIR}/bin" "${BUILD_DIR}/"
-cp "${ROOT_DIR}/requirements.txt" "${BUILD_DIR}/"
+TMP_TAR=$(mktemp /tmp/registry-center-source-XXXXXX.tar.gz)
+if curl -fsSL "${SOURCE_URL}" -o "${TMP_TAR}"; then
+    tar -xzf "${TMP_TAR}" -C "${BUILD_DIR}" --strip-components=1
+    echo "  Source downloaded and extracted."
+else
+    echo -e "${RED}Error: Failed to download registry-center source ${SOURCE_VERSION}.${NC}"
+    rm -f "${TMP_TAR}"
+    exit 1
+fi
+rm -f "${TMP_TAR}"
 
-# Remove unnecessary files from copied source
+# Remove unnecessary files from extracted source
 find "$BUILD_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 find "$BUILD_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
 rm -rf "${BUILD_DIR}/bin/package_offline.sh"
 
 # Create empty runtime directories
 mkdir -p "${BUILD_DIR}/log" "${BUILD_DIR}/run" "${BUILD_DIR}/data"
-
-echo "  Source copied."
 
 # --- Step 5: Download wheel packages for both architectures ---
 echo -e "${GREEN}[5/7] Downloading wheel packages for x86_64 and aarch64...${NC}"
@@ -176,7 +183,7 @@ download_wheels_for_arch() {
 
     echo -e "  ${YELLOW}Downloading binary wheels for ${arch_name}...${NC}"
     "${VENV_PACKAGING_DIR}/bin/pip" download \
-        -r "${ROOT_DIR}/requirements.txt" \
+        -r "${BUILD_DIR}/requirements.txt" \
         "${flags[@]}" \
         --python-version "$PYTHON_VERSION" \
         --only-binary=:all: \
@@ -193,7 +200,7 @@ download_wheels_for_arch "aarch64" "${PIP_PLATFORMS_AARCH64[@]}"
 # Download pure-Python packages (platform 'any', shared by both architectures)
 echo -e "  ${YELLOW}Downloading pure-Python wheels (platform any)...${NC}"
 "${VENV_PACKAGING_DIR}/bin/pip" download \
-    -r "${ROOT_DIR}/requirements.txt" \
+    -r "${BUILD_DIR}/requirements.txt" \
     --platform any \
     --python-version "$PYTHON_VERSION" \
     --only-binary=:all: \

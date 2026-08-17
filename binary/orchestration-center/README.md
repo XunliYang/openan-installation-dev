@@ -31,15 +31,17 @@
 #### 第一阶段：在联网机器上打包
 
 ```bash
-# 前提条件：Python 3.12+、Node.js 20.19+、npm、互联网连接
+# 前提条件：Python 3.12+、Node.js 20.19+、npm、curl、tar、互联网连接
 ./pack_orc.sh
 ```
 
 生成的 tarball 包含：
-- 完整项目源码（Python + React）
+- 完整项目源码（从 GitHub release 下载，Python + React）
 - 预下载的 Python wheels（x86_64 + aarch64 双架构，用于离线构建 venv）
 - npm 缓存（用于离线构建前端 node_modules）
 - 配置模板文件
+
+> **源码说明**：pack 脚本自动从 GitHub 下载应用源码 tarball，无需本地预置源码（见 ADR-016）。
 
 > **注意**：venv 和 node_modules 不在打包时预构建，而是在离线机器上从 wheels 和 npm 缓存本地构建，确保架构兼容性。
 
@@ -138,15 +140,17 @@ This directory contains offline deployment scripts for the Orchestration Center.
 #### Phase 1: Package on the Online Machine
 
 ```bash
-# Prerequisites: Python 3.12+, Node.js 20.19+, npm, internet access
+# Prerequisites: Python 3.12+, Node.js 20.19+, npm, curl, tar, internet access
 ./pack_orc.sh
 ```
 
 The resulting tarball contains:
-- Full project source code (Python + React)
+- Full project source code (downloaded from GitHub release, Python + React)
 - Pre-downloaded Python wheels (x86_64 + aarch64, for offline venv build)
 - npm cache (for offline frontend node_modules build)
 - Configuration templates
+
+> **Source note**: The pack script automatically downloads the application source tarball from GitHub. No local source code is required (see ADR-016).
 
 > **Note**: venv and node_modules are NOT pre-built. They are built on the target machine from the bundled wheels and npm cache, ensuring architecture compatibility.
 
