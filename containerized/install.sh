@@ -84,6 +84,21 @@ ask_input() {
     echo "${value:-$default}"
 }
 
+ask_input_secret() {
+    local prompt="$1"
+    local default="$2"
+    local value
+    
+    if [ -n "$default" ]; then
+        log_prompt "$prompt [****]:" >&2
+    else
+        log_prompt "$prompt:" >&2
+    fi
+    read -s -r value >&2
+    echo "" >&2
+    echo "${value:-$default}"
+}
+
 ask_choice() {
     local prompt="$1"
     shift
@@ -637,7 +652,7 @@ if [ "$CONFIG_REGISTRY" = true ]; then
     log_info "Chat Model:"
     CONFIG_REGISTRY_CHAT_MODEL=$(ask_input "  Model name (e.g., gpt-4, claude-3-opus)" "")
     CONFIG_REGISTRY_CHAT_URL=$(ask_input "  API URL (e.g., https://api.openai.com/v1/chat/completions)" "")
-    CONFIG_REGISTRY_CHAT_APIKEY=$(ask_input "  API Key" "")
+    CONFIG_REGISTRY_CHAT_APIKEY=$(ask_input_secret "  API Key" "")
 fi
 
 # Step 4: LLM Configuration for Orchestration Center
@@ -649,7 +664,7 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
     log_info "Chat Model:"
     CONFIG_ORCH_CHAT_MODEL=$(ask_input "  Model name (e.g., gpt-4, claude-3-opus)" "")
     CONFIG_ORCH_CHAT_URL=$(ask_input "  API URL (e.g., https://api.openai.com/v1/chat/completions)" "")
-    CONFIG_ORCH_CHAT_APIKEY=$(ask_input "  API Key" "")
+    CONFIG_ORCH_CHAT_APIKEY=$(ask_input_secret "  API Key" "")
 fi
 
 # Step 5: Agent Examples Server
