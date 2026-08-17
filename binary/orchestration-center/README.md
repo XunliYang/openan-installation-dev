@@ -51,11 +51,11 @@ tar xzf orchestration-center-offline-bundle.tar.gz
 cd orchestration-center-offline
 
 # 2. 运行安装脚本
-./bin/install_orc.sh
+./install_orc.sh
 
 # 3. 编辑配置文件（参见 offline_config_guide.md）
 # 4. 启动服务
-bin/start.sh
+./start.sh
 ```
 
 `install_orc.sh` 支持的参数：
@@ -158,11 +158,11 @@ tar xzf orchestration-center-offline-bundle.tar.gz
 cd orchestration-center-offline
 
 # 2. Run the installer
-./bin/install_orc.sh
+./install_orc.sh
 
 # 3. Edit config files (see offline_config_guide.md)
 # 4. Start the service
-bin/start.sh
+./start.sh
 ```
 
 `install_orc.sh` supported options:

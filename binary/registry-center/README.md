@@ -31,10 +31,10 @@
 
 ```bash
 # 前提条件：Python 3.12+、互联网连接
-./bin/pack_reg.sh
+./pack_reg.sh
 
 # 指定版本号和输出目录
-./bin/pack_reg.sh --version=1.0.0 --output=dist
+./pack_reg.sh --version=1.0.0 --output=dist
 ```
 
 支持的参数：
@@ -65,19 +65,19 @@ tar -xzf registry-center-1.0.0-linux.tar.gz
 cd registry-center-1.0.0-linux
 
 # 2. 运行安装脚本（推荐用 source 激活 venv）
-source bin/install_reg.sh
+source ./install_reg.sh
 
 # 跳过交互式配置
-source bin/install_reg.sh --skip-init
+source ./install_reg.sh --skip-init
 
 # 指定 Python 解释器
-source bin/install_reg.sh --python=python3.12
+source ./install_reg.sh --python=python3.12
 
 # 3. 启动服务
-bin/start.sh
+./start.sh
 
 # 4. 停止服务
-bin/stop.sh
+./stop.sh
 ```
 
 `install_reg.sh` 支持的参数：
@@ -96,7 +96,7 @@ bin/stop.sh
 4. 从本地 wheels 安装依赖（无需联网）
 5. 运行交互式配置向导（可跳过）
 
-> **注意**：使用 `source` 执行脚本可在当前 shell 中激活虚拟环境。直接执行（`./bin/install_reg.sh`）则不会激活，需手动运行 `source venv/bin/activate`。
+> **注意**：使用 `source` 执行脚本可在当前 shell 中激活虚拟环境。直接执行（`./install_reg.sh`）则不会激活，需手动运行 `source venv/bin/activate`。
 
 ### 离线机器前提条件
 
@@ -138,7 +138,7 @@ etc/ssl/cert_pwd         ← 私钥密码
 
 ```bash
 # 安装为 systemd 服务（需要 root）
-sudo ./bin/install_service.sh install
+sudo ./install_service.sh install
 sudo systemctl start registry-center
 
 # 查看状态
@@ -146,7 +146,7 @@ sudo systemctl status registry-center
 
 # 停止 / 卸载
 sudo systemctl stop registry-center
-sudo ./bin/install_service.sh uninstall
+sudo ./install_service.sh uninstall
 ```
 
 ### 目录结构
@@ -157,7 +157,6 @@ registry-center-1.0.0-linux/
 ├── common/               共享模块和配置模板
 ├── etc/conf/             配置文件
 ├── etc/systemd/          systemd 服务模板
-├── bin/                  运维脚本
 ├── wheels/               预下载的 Python wheel 包（x86_64 + aarch64）
 ├── venv/                 虚拟环境（由 install_reg.sh 创建）
 ├── log/                  运行日志
@@ -175,7 +174,7 @@ A: 离线包包含 x86_64 和 aarch64 双架构 wheels。如果安装失败，�
 A: 运行 `./venv/bin/python -m agent_registry.init`，可随时重新配置 IP、端口、TLS、存储等。
 
 **Q: 虚拟环境损坏了怎么办？**
-A: 删除 `venv/` 目录后重新运行 `source bin/install_reg.sh`，会从本地 wheels 重建。
+A: 删除 `venv/` 目录后重新运行 `source ./install_reg.sh`，会从本地 wheels 重建。
 
 ---
 
@@ -206,10 +205,10 @@ This directory contains offline deployment scripts for the Registry Center. It u
 
 ```bash
 # Prerequisites: Python 3.12+, internet access
-./bin/pack_reg.sh
+./pack_reg.sh
 
 # Specify version label and output directory
-./bin/pack_reg.sh --version=1.0.0 --output=dist
+./pack_reg.sh --version=1.0.0 --output=dist
 ```
 
 Supported options:
@@ -240,19 +239,19 @@ tar -xzf registry-center-1.0.0-linux.tar.gz
 cd registry-center-1.0.0-linux
 
 # 2. Run the setup script (use 'source' to activate venv in your shell)
-source bin/install_reg.sh
+source ./install_reg.sh
 
 # Skip interactive configuration
-source bin/install_reg.sh --skip-init
+source ./install_reg.sh --skip-init
 
 # Specify Python interpreter
-source bin/install_reg.sh --python=python3.12
+source ./install_reg.sh --python=python3.12
 
 # 3. Start the service
-bin/start.sh
+./start.sh
 
 # 4. Stop the service
-bin/stop.sh
+./stop.sh
 ```
 
 `install_reg.sh` supported options:
@@ -271,7 +270,7 @@ Setup process:
 4. Install dependencies from local wheels (no internet needed)
 5. Run interactive configuration wizard (can be skipped)
 
-> **Note**: Use `source` to run the script so the venv is activated in your current shell. If you run it directly (`./bin/install_reg.sh`), the venv will not be activated; you must manually run `source venv/bin/activate`.
+> **Note**: Use `source` to run the script so the venv is activated in your current shell. If you run it directly (`./install_reg.sh`), the venv will not be activated; you must manually run `source venv/bin/activate`.
 
 ### Offline Machine Prerequisites
 
@@ -313,7 +312,7 @@ etc/ssl/cert_pwd         ← Private key password
 
 ```bash
 # Install as systemd service (requires root)
-sudo ./bin/install_service.sh install
+sudo ./install_service.sh install
 sudo systemctl start registry-center
 
 # Check status
@@ -321,7 +320,7 @@ sudo systemctl status registry-center
 
 # Stop / uninstall
 sudo systemctl stop registry-center
-sudo ./bin/install_service.sh uninstall
+sudo ./install_service.sh uninstall
 ```
 
 ### Directory Layout
@@ -332,7 +331,6 @@ registry-center-1.0.0-linux/
 ├── common/               Shared modules and config templates
 ├── etc/conf/             Configuration files
 ├── etc/systemd/          Systemd service templates
-├── bin/                  Operational scripts
 ├── wheels/               Pre-downloaded Python wheel packages (x86_64 + aarch64)
 ├── venv/                 Virtual environment (created by install_reg.sh)
 ├── log/                  Runtime logs
@@ -350,4 +348,4 @@ A: The offline package contains wheels for both x86_64 and aarch64. If installat
 A: Run `./venv/bin/python -m agent_registry.init` to reconfigure IP, port, TLS, storage, etc. at any time.
 
 **Q: The virtual environment is broken. What now?**
-A: Delete the `venv/` directory and re-run `source bin/install_reg.sh`. It will rebuild from the local wheels.
+A: Delete the `venv/` directory and re-run `source ./install_reg.sh`. It will rebuild from the local wheels.
