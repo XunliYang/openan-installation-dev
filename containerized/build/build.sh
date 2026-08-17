@@ -28,8 +28,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # ===== Defaults =====
-IMAGE_REGISTRY="docker.io"
-NAMESPACE="leoyy6"
+IMAGE_REGISTRY="ghcr.io"
+NAMESPACE="xunliyang"
 TAG="v1.0.0"
 REGISTRY_RELEASE=""
 ORCHESTRATION_RELEASE=""

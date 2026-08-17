@@ -59,8 +59,8 @@ registry:
   enabled: true
   replicas: 2
   image:
-    repository: leoyy6/registry-center
-    tag: V1.0.0
+    repository: ghcr.io/xunliyang/registry-center
+    tag: latest
     pullPolicy: Always
   port: 5000
   # LLM configuration for registry-center
