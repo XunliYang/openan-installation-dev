@@ -90,18 +90,12 @@ echo -e "${GREEN}[1/8] Finding offline package...${NC}"
 TARBALL=""
 # Check dist/ subdirectory first (pack_reg.sh default output location)
 for f in "${SCRIPT_DIR}"/dist/registry-center-*.tar.gz; do
-    if [ -f "$f" ]; then
-        TARBALL="$f"
-        break
-    fi
+    [ -f "$f" ] && TARBALL="$f" && break
 done
 # Then check script directory itself
 if [ -z "$TARBALL" ]; then
     for f in "${SCRIPT_DIR}"/registry-center-*.tar.gz; do
-        if [ -f "$f" ]; then
-            TARBALL="$f"
-            break
-        fi
+        [ -f "$f" ] && TARBALL="$f" && break
     done
 fi
 
