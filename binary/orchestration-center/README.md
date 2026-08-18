@@ -47,26 +47,21 @@
 
 #### 第二阶段：在离线机器上安装
 
+将 `install_orc.sh` 与离线包 `dist/orchestration-center-offline-bundle.tar.gz`
+放在**同一目录**，直接运行安装脚本（无需手动解压）：
+
 ```bash
-# 1. 解压离线包
-tar xzf orchestration-center-offline-bundle.tar.gz
-cd orchestration-center-offline
-
-# 2. 运行安装脚本
 ./install_orc.sh
-
-# 3. 编辑配置文件（参见 offline_config_guide.md）
-# 4. 启动服务
-./start.sh
 ```
+
+脚本自动完成全部安装流程：解压离线包 → 检测架构 → 创建 venv → 从本地
+wheels 安装依赖 → 构建前端 → 配置 nginx HTTPS → 启动服务。
 
 `install_orc.sh` 支持的参数：
 
 | 参数 | 说明 |
 |------|------|
-| `--dir=PATH` | 安装目录（默认：`/opt/orchestration-center`） |
-| `--service` | 安装为 systemd 服务（需要 root） |
-| `--no-service` | 不安装为 systemd 服务（手动启动） |
+| `-h` / `--help` | 显示帮助信息并退出 |
 
 > **架构自动检测**：install 脚本会自动检测系统架构（`uname -m`），归一化为 `x86_64` 或 `aarch64`，并验证 wheels 目录中存在对应架构的 wheel 包。venv 和 node_modules 在离线机器上本地构建，无需手动指定架构。
 
@@ -156,26 +151,23 @@ The resulting tarball contains:
 
 #### Phase 2: Install on the Offline Machine
 
+Put `install_orc.sh` and the offline bundle
+`dist/orchestration-center-offline-bundle.tar.gz` in the **same directory**,
+then run the installer directly (no manual extraction needed):
+
 ```bash
-# 1. Extract the bundle
-tar xzf orchestration-center-offline-bundle.tar.gz
-cd orchestration-center-offline
-
-# 2. Run the installer
 ./install_orc.sh
-
-# 3. Edit config files (see offline_config_guide.md)
-# 4. Start the service
-./start.sh
 ```
+
+The script automates the whole install: extract the bundle → detect
+architecture → create venv → install deps from local wheels → build
+frontend → configure nginx HTTPS → start the service.
 
 `install_orc.sh` supported options:
 
 | Option | Description |
 |--------|-------------|
-| `--dir=PATH` | Install directory (default: `/opt/orchestration-center`) |
-| `--service` | Install as systemd service (requires root) |
-| `--no-service` | Do not install as systemd service (manual start) |
+| `-h` / `--help` | Show help and exit |
 
 > **Architecture auto-detection**: The install script auto-detects the system architecture (`uname -m`), normalizes it to `x86_64` or `aarch64`, and verifies that matching wheels exist. venv and node_modules are built locally on the target machine — no manual arch flag needed.
 

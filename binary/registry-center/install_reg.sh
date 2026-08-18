@@ -106,14 +106,22 @@ if [ -z "$TARBALL" ]; then
     echo "       Please run pack_reg.sh first to build the offline package."
     exit 1
 fi
-echo "  Found: ${TARBALL}"
-
-PKG_NAME=$(basename "$TARBALL" .tar.gz)
+echo -e "${GREEN}  ✓${NC} Found: ${TARBALL}"
 
 # ─── Step 2: Extract ─────────────────────────────────────────────────────────
 echo -e "${GREEN}[2/8] Extracting package...${NC}"
 
-EXTRACT_DIR="${SCRIPT_DIR}/${PKG_NAME}"
+# Resolve the real top-level directory name INSIDE the tarball. Never infer
+# it from the tarball file name — pack_reg.sh may name the tarball and its
+# top-level dir differently (see ADR-019).
+TOP_LEVELS=$(tar -tzf "$TARBALL" | cut -d/ -f1 | sort -u)
+TOP_LEVEL_COUNT=$(echo "${TOP_LEVELS}" | sed '/^$/d' | wc -l)
+if [ "${TOP_LEVEL_COUNT}" -ne 1 ]; then
+    echo -e "${RED}Error: Expected tarball to contain exactly ONE top-level directory.${NC}"
+    echo "       Found: $(echo "${TOP_LEVELS}" | tr '\n' ' ')"
+    exit 1
+fi
+EXTRACT_DIR="${SCRIPT_DIR}/${TOP_LEVELS}"
 
 if [ -d "$EXTRACT_DIR" ]; then
     echo -e "${YELLOW}  Directory already exists: ${EXTRACT_DIR}${NC}"

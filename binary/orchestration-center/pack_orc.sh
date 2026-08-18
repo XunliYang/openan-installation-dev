@@ -36,9 +36,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_URL="https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz"
 SOURCE_VERSION="v1.0.0"
 
-BUNDLE_NAME="orchestration-center-offline"
+BUNDLE_NAME="orchestration-center-offline-bundle"
 BUILD_DIR="${SCRIPT_DIR}/.offline-build"
 BUNDLE_DIR="${BUILD_DIR}/${BUNDLE_NAME}"
+OUTPUT_DIR="${SCRIPT_DIR}/dist"
 
 # ─── Parse args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -294,19 +295,12 @@ target machine from the bundled wheels and npm cache. This ensures architecture
 compatibility (the target machine may have a different CPU architecture).
 
 To install on the air-gapped machine:
-  install_orc.sh (in the same directory as this tarball) handles everything:
-  extraction, venv creation, dependency installation, frontend build,
-  nginx configuration, and service start.
+  Copy this tarball and install_orc.sh into the SAME directory, then run
+  ./install_orc.sh — it handles everything: extraction, venv creation,
+  dependency installation, frontend build, nginx configuration, and
+  service start.
 
   ./install_orc.sh
-
-  Manual setup (if install_orc.sh is not available):
-  1. Extract: tar xzf orchestration-center-offline-bundle.tar.gz
-  2. Create venv: python3.12 -m venv venv
-  3. Install deps: venv/bin/pip install --no-index --find-links=vendor/wheels -r requirements.txt
-  4. Build frontend: cd workflow-designer && npm install --force --cache vendor/npm-cache && npm run build
-  5. Configure: edit files in etc/conf/ and common/config/
-  6. Start:   bin/start.sh  (or bin/install_service.sh install for systemd)
 
 EOF
 
@@ -316,7 +310,8 @@ echo ""
 # ─── Create the tarball ──────────────────────────────────────────────────────
 echo -e "${YELLOW}Step 7: Creating tarball...${NC}"
 
-TARBALL="${SCRIPT_DIR}/${BUNDLE_NAME}-bundle.tar.gz"
+mkdir -p "$OUTPUT_DIR"
+TARBALL="${OUTPUT_DIR}/${BUNDLE_NAME}.tar.gz"
 
 # Go to build dir parent so the tarball has a clean top-level dir name
 cd "$BUILD_DIR"
@@ -336,6 +331,6 @@ echo "Output:  $TARBALL"
 echo "Size:    $TARBALL_SIZE"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Copy $TARBALL and install_orc.sh to the air-gapped machine (USB, SCP, etc.)"
+echo "  1. Copy dist/${BUNDLE_NAME}.tar.gz and install_orc.sh to the air-gapped machine (USB, SCP, etc.)"
 echo "  2. Install:  ./install_orc.sh"
 echo ""

@@ -101,31 +101,40 @@ find_nginx_binary() {
 echo -e "${YELLOW}Step 1: Finding offline package...${NC}"
 
 TARBALL=""
-for f in "${SCRIPT_DIR}"/orchestration-center-offline-*.tar.gz; do
+# Check dist/ subdirectory first (pack_orc.sh default output location)
+for f in "${SCRIPT_DIR}"/dist/orchestration-center-offline-*.tar.gz; do
     [ -f "$f" ] && TARBALL="$f" && break
 done
-# Also check dist/ subdirectory
+# Then check script directory itself
 if [ -z "$TARBALL" ]; then
-    for f in "${SCRIPT_DIR}"/dist/orchestration-center-offline-*.tar.gz; do
+    for f in "${SCRIPT_DIR}"/orchestration-center-offline-*.tar.gz; do
         [ -f "$f" ] && TARBALL="$f" && break
     done
 fi
 
 if [ -z "$TARBALL" ]; then
     echo -e "${RED}Error: No orchestration-center tarball found.${NC}"
-    echo "       Searched: ${SCRIPT_DIR}/orchestration-center-offline-*.tar.gz"
     echo "       Searched: ${SCRIPT_DIR}/dist/orchestration-center-offline-*.tar.gz"
+    echo "       Searched: ${SCRIPT_DIR}/orchestration-center-offline-*.tar.gz"
     echo "       Please run pack_orc.sh first to build the offline package."
     exit 1
 fi
 echo -e "  ${GREEN}✓${NC} Found: ${TARBALL}"
 
-PKG_NAME=$(basename "$TARBALL" .tar.gz)
-
 # ─── Step 2: Extract ─────────────────────────────────────────────────────────
 echo -e "${YELLOW}Step 2: Extracting package...${NC}"
 
-EXTRACT_DIR="${SCRIPT_DIR}/${PKG_NAME}"
+# Resolve the real top-level directory name INSIDE the tarball. Never infer
+# it from the tarball file name — pack_orc.sh may name the tarball and its
+# top-level dir differently (see ADR-019).
+TOP_LEVELS=$(tar -tzf "$TARBALL" | cut -d/ -f1 | sort -u)
+TOP_LEVEL_COUNT=$(echo "${TOP_LEVELS}" | sed '/^$/d' | wc -l)
+if [ "${TOP_LEVEL_COUNT}" -ne 1 ]; then
+    echo -e "${RED}Error: Expected tarball to contain exactly ONE top-level directory.${NC}"
+    echo "       Found: $(echo "${TOP_LEVELS}" | tr '\n' ' ')"
+    exit 1
+fi
+EXTRACT_DIR="${SCRIPT_DIR}/${TOP_LEVELS}"
 
 if [ -d "$EXTRACT_DIR" ]; then
     echo -e "${YELLOW}  Directory already exists: ${EXTRACT_DIR}${NC}"
