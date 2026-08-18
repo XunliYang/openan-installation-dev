@@ -541,3 +541,29 @@ defaults"），但 README 仍残留阿里云通义千问（`qwen3.6-flash`、
 `<model-name>`、`<api-url>`）、命令示例统一为占位符风格、"建议使用"块整块
 删除，使文档与脚本行为完全一致。此变更属于脚本层面去厂商化规范（见开发实践
 规范"移除第三方依赖引用规范"）在文档层面的同步延伸。
+
+## --platform any 通道 (Any-platform Pass)
+
+pack 脚本（`pack_reg.sh`、`pack_orc.sh`）中曾存在的第三个 wheel 下载通道
+（ADR-018 已删除）。用 `pip download --platform any` 尝试单独下载纯 Python
+wheel。该通道有两个致命缺陷：纯 Python wheel（标签 `py3-none-any`）匹配任意
+`--platform`，已被二进制平台通道顺带下载，此通道本身是死代码；C 扩展包（如
+PyYAML、cryptography）没有 `py3-none-any` wheel，整批解析必然失败并打印
+误导性错误（如 `Could not find a version that satisfies the requirement
+PyYAML>=6.0.3 (from versions: none)`），看起来像"离线包缺依赖"。
+
+## pip 整批解析 (All-or-Nothing Resolution)
+
+pip 解析 `-r requirements.txt` 的行为特征：整个需求集合作为一个整体解析，
+任一需求解析失败（找不到匹配版本）则整条 `pip download` 命令失败，且**一个
+文件都不写盘**。此行为使 `--platform any` 通道的失败被放大为"该通道零产出"，
+也让错误的 `|| true` 吞掉后离线包缺依赖的事实被彻底隐藏（见 ADR-018）。
+
+## 打包吞错 (Silent Error Swallowing)
+
+pack 脚本中 `pip download ... 2>&1 | sed 's/^/  /' || true` 结尾的 `|| true`
+导致的行为：真实下载失败（网络断、依赖缺失、平台无 wheel）被静默消化，脚本
+照常退出 0，离线包带着缺失的依赖被打包出来，直到离线安装阶段才报错。ADR-018
+移除了该 `|| true`，配合 `set -euo pipefail` 使下载失败在打包阶段立即中止。
+`WHEEL_COUNT > 0` 检查只能证明目录里有 wheel 文件，无法验证依赖完整性
+（见 ADR-018）。

@@ -182,30 +182,27 @@ download_wheels_for_arch() {
     done
 
     echo -e "  ${YELLOW}Downloading binary wheels for ${arch_name}...${NC}"
+    "${VENV_PACKAGING_DIR}/bin/pip" install --upgrade pip wheel >/dev/null 2>&1
+    # NOTE: no '|| true' here — a failed download must abort the pack run so
+    # the error surfaces at pack time, not at install time (see ADR-018).
+    # With 'set -o pipefail' the pipeline propagates pip's exit code.
     "${VENV_PACKAGING_DIR}/bin/pip" download \
         -r "${BUILD_DIR}/requirements.txt" \
         "${flags[@]}" \
         --python-version "$PYTHON_VERSION" \
         --only-binary=:all: \
         --dest "$WHEELS_DIR" \
-        2>&1 | sed 's/^/  /' || true
+        2>&1 | sed 's/^/  /'
 }
 
 # Download binary wheels for x86_64
+# pure-Python wheels (tag 'any') are picked up here as well: a py3-none-any
+# wheel matches any --platform, so a separate --platform any pass is both
+# redundant and guaranteed to fail on C-extension deps (see ADR-018).
 download_wheels_for_arch "x86_64" "${PIP_PLATFORMS_X86_64[@]}"
 
 # Download binary wheels for aarch64
 download_wheels_for_arch "aarch64" "${PIP_PLATFORMS_AARCH64[@]}"
-
-# Download pure-Python packages (platform 'any', shared by both architectures)
-echo -e "  ${YELLOW}Downloading pure-Python wheels (platform any)...${NC}"
-"${VENV_PACKAGING_DIR}/bin/pip" download \
-    -r "${BUILD_DIR}/requirements.txt" \
-    --platform any \
-    --python-version "$PYTHON_VERSION" \
-    --only-binary=:all: \
-    --dest "$WHEELS_DIR" \
-    2>&1 | sed 's/^/  /' || true
 
 # Verify wheels were downloaded for both architectures
 WHEEL_COUNT=$(find "$WHEELS_DIR" -name "*.whl" | wc -l)

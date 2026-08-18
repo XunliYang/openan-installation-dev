@@ -102,18 +102,12 @@ echo -e "${YELLOW}Step 1: Finding offline package...${NC}"
 
 TARBALL=""
 for f in "${SCRIPT_DIR}"/orchestration-center-offline-*.tar.gz; do
-    if [ -f "$f" ]; then
-        TARBALL="$f"
-        break
-    fi
+    [ -f "$f" ] && TARBALL="$f" && break
 done
 # Also check dist/ subdirectory
 if [ -z "$TARBALL" ]; then
     for f in "${SCRIPT_DIR}"/dist/orchestration-center-offline-*.tar.gz; do
-        if [ -f "$f" ]; then
-            TARBALL="$f"
-            break
-        fi
+        [ -f "$f" ] && TARBALL="$f" && break
     done
 fi
 
