@@ -6,10 +6,10 @@ System-level installation tooling for OpenAN, providing one-click binary install
 
 ```
 openan-installation/
-├── binary/                          # Binary installation
-│   ├── one-click/                   # One-click installation scripts
-│   ├── orchestration-center/        # Orchestration Center binaries
-│   └── registry-center/             # Registry Center binaries
+├── binary/one-click/                # Binary installation
+│   ├── openan_install.sh            # one-click installation script
+│   ├── openan_uninstall.sh          # one-click uninstall script
+│   ├── README.md                    # Binary installation guide
 └── containerized/                   # Containerized installation
     ├── build/                       # Image build scripts
     ├── install.sh                   # Interactive installation tool
@@ -87,14 +87,7 @@ cd binary/one-click
 
 ## Upgrade
 
-> **Note:** Upgrade functionality is currently under development and not yet available.
-
-For containerized deployments, upgrade will be supported via:
-
-```bash
-cd containerized
-helm upgrade openan ./openan-chart -n openan
-```
+> **Note:** Upgrade functionality including single component upgrades and all-in-one upgrades is currently under development and not yet available.
 
 ## Documentation
 
