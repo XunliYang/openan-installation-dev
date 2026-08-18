@@ -25,7 +25,7 @@ cd build
 ./build.sh
 ```
 
-This single command downloads release v1.0.0 packages from GitHub, builds all component images, and pushes them to Docker Hub.
+This single command downloads release v1.0.0 packages from GitHub, builds all component images, and pushes them to ghcr.io.
 
 ### Build Specific Components
 
@@ -38,7 +38,7 @@ This single command downloads release v1.0.0 packages from GitHub, builds all co
 ### Custom Registry
 
 ```bash
-./build.sh --image-registry harbor.example.com --namespace openan --tag v1.0.0
+./build.sh --image-registry harbor.example.com --namespace project-openan --tag v1.0.0
 ```
 
 ### Local Build (No Push)
@@ -63,8 +63,8 @@ If no components specified, all components are built. Specify one or both to bui
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--image-registry <url>` | Image registry address | `docker.io` |
-| `--namespace <ns>` | Image namespace | `openan` |
+| `--image-registry <url>` | Image registry address | `ghcr.io` |
+| `--namespace <ns>` | Image namespace | `project-openan` |
 | `--tag <tag>` | Image tag | `v1.0.0` |
 | `--registry-release <url>` | Registry Center release tarball URL | GitHub release v1.0.0 |
 | `--orchestration-release <url>` | Orchestration Center release tarball URL | GitHub release v1.0.0 |
@@ -145,10 +145,10 @@ The build script uses `docker buildx` to support multi-architecture images (amd6
 
 ```bash
 # View supported architectures for an image
-docker buildx imagetools inspect docker.io/openan/registry-center:v1.0.0
+docker buildx imagetools inspect ghcr.io/project-openan/registry-center:v1.0.0
 
 # Example output:
-# Name: docker.io/openan/registry-center:v1.0.0
+# Name: ghcr.io/project-openan/registry-center:v1.0.0
 # Manifests:
 #   Name: ...@sha256:abc123
 #   Platform: linux/amd64
@@ -197,14 +197,14 @@ Built images follow this naming format:
 ```
 
 Examples:
-- `docker.io/openan/registry-center:v1.0.0`
-- `docker.io/openan/orchestration-center:v1.0.0`
-- `docker.io/openan/workflow-designer:v1.0.0`
+- `ghcr.io/project-openan/registry-center:v1.0.0`
+- `ghcr.io/project-openan/orchestration-center:v1.0.0`
+- `ghcr.io/project-openan/workflow-designer:v1.0.0`
 
 Private registry examples:
-- `harbor.example.com/openan/registry-center:v1.0.0`
-- `harbor.example.com/openan/orchestration-center:v1.0.0`
-- `harbor.example.com/openan/workflow-designer:v1.0.0`
+- `harbor.example.com/project-openan/registry-center:v1.0.0`
+- `harbor.example.com/project-openan/orchestration-center:v1.0.0`
+- `harbor.example.com/project-openan/workflow-designer:v1.0.0`
 
 ## Integration with Helm Chart
 
@@ -214,25 +214,25 @@ After building, deploy using the Helm Chart:
 # Using command-line overrides
 helm install openan ./openan-chart \
   -n openan --create-namespace \
-  --set registry.image.repository=docker.io/openan/registry-center \
+  --set registry.image.repository=ghcr.io/project-openan/registry-center \
   --set registry.image.tag=v1.0.0 \
-  --set orchestration.image.repository=docker.io/openan/orchestration-center \
+  --set orchestration.image.repository=ghcr.io/project-openan/orchestration-center \
   --set orchestration.image.tag=v1.0.0 \
-  --set frontend.image.repository=docker.io/openan/workflow-designer \
+  --set frontend.image.repository=ghcr.io/project-openan/workflow-designer \
   --set frontend.image.tag=v1.0.0
 
 # Or edit values-custom.yaml
 # registry:
 #   image:
-#     repository: docker.io/openan/registry-center
+#     repository: ghcr.io/project-openan/registry-center
 #     tag: v1.0.0
 # orchestration:
 #   image:
-#     repository: docker.io/openan/orchestration-center
+#     repository: ghcr.io/project-openan/orchestration-center
 #     tag: v1.0.0
 # frontend:
 #   image:
-#     repository: docker.io/openan/workflow-designer
+#     repository: ghcr.io/project-openan/workflow-designer
 #     tag: v1.0.0
 
 helm install openan ./openan-chart -n openan --create-namespace -f values-custom.yaml
@@ -290,7 +290,7 @@ docker buildx create --name default --use
 A: Specify registry and namespace:
 
 ```bash
-./build.sh --image-registry harbor.example.com --namespace openan --tag v1.0.0
+./build.sh --image-registry harbor.example.com --namespace project-openan --tag v1.0.0
 ```
 
 Ensure you're logged in:
@@ -308,7 +308,7 @@ A: Use these commands to check:
 docker images | grep openan
 
 # For multi-arch images, inspect manifest
-docker buildx imagetools inspect docker.io/openan/registry-center:v1.0.0
+docker buildx imagetools inspect ghcr.io/project-openan/registry-center:v1.0.0
 ```
 
 ## Best Practices

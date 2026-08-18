@@ -12,8 +12,8 @@
 # Options:
 #   --registry-release <url>   Registry Center release URL
 #   --orchestration-release <url> Orchestration Center release URL
-#   --image-registry <url>     Image registry (default: docker.io)
-#   --namespace <ns>           Image namespace (default: openan)
+#   --image-registry <url>     Image registry (default: ghcr.io)
+#   --namespace <ns>           Image namespace (default: project-openan)
 #   --tag <tag>                Image tag (default: v1.0.0)
 #   --platforms <platforms>    Target platforms (default: linux/amd64,linux/arm64)
 #   --no-push                  Build local only (single-arch only)
@@ -29,7 +29,7 @@ NC='\033[0m'
 
 # ===== Defaults =====
 IMAGE_REGISTRY="ghcr.io"
-NAMESPACE="xunliyang"
+NAMESPACE="project-openan"
 TAG="v1.0.0"
 REGISTRY_RELEASE=""
 ORCHESTRATION_RELEASE=""
@@ -66,8 +66,8 @@ Components (positional, specify any):
   (none)            Build all components
 
 Options:
-  --image-registry <url>     Image registry (default: docker.io)
-  --namespace <ns>           Image namespace (default: openan)
+  --image-registry <url>     Image registry (default: ghcr.io)
+  --namespace <ns>           Image namespace (default: project-openan)
   --tag <tag>                Image tag (default: v1.0.0)
   --registry-release <url>   Registry Center release tarball URL
   --orchestration-release <url>  Orchestration Center release tarball URL

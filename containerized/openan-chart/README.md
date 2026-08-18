@@ -148,7 +148,7 @@ kubectl -n openan port-forward svc/workflow-designer 8080:80
 |-----------|-------------|---------|
 | `registry.enabled` | Enable Registry Center | `true` |
 | `registry.replicas` | Replica count | `2` |
-| `registry.image.repository` | Image repository | `ghcr.io/xunliyang/registry-center` |
+| `registry.image.repository` | Image repository | `ghcr.io/project-openan/registry-center` |
 | `registry.image.tag` | Image tag | `v1.0.0` |
 | `registry.image.pullPolicy` | Image pull policy | `Always` |
 | `registry.port` | Service port | `5000` |
@@ -178,7 +178,7 @@ kubectl -n openan port-forward svc/workflow-designer 8080:80
 |-----------|-------------|---------|
 | `orchestration.enabled` | Enable Orchestration Center | `true` |
 | `orchestration.replicas` | Replica count | `1` |
-| `orchestration.image.repository` | Image repository | `ghcr.io/xunliyang/orchestration-center` |
+| `orchestration.image.repository` | Image repository | `ghcr.io/project-openan/orchestration-center` |
 | `orchestration.image.tag` | Image tag | `v1.0.0` |
 | `orchestration.image.pullPolicy` | Image pull policy | `Always` |
 | `orchestration.port` | Service port | `5001` |
@@ -199,7 +199,7 @@ kubectl -n openan port-forward svc/workflow-designer 8080:80
 |-----------|-------------|---------|
 | `frontend.enabled` | Enable Workflow Designer | `true` |
 | `frontend.replicas` | Replica count | `2` |
-| `frontend.image.repository` | Image repository | `ghcr.io/xunliyang/workflow-designer` |
+| `frontend.image.repository` | Image repository | `ghcr.io/project-openan/workflow-designer` |
 | `frontend.image.tag` | Image tag | `v1.0.0` |
 | `frontend.image.pullPolicy` | Image pull policy | `Always` |
 | `frontend.port` | Service port | `80` |
