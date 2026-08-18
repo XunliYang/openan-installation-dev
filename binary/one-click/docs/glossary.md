@@ -529,3 +529,15 @@ pack 脚本和 one-click 安装脚本都需要从 GitHub 下载应用源码 tarb
 替代了原先创建在 `ROOT_DIR/.venv` 中的持久化 venv（需要“已存在则重建”逻辑）。
 临时 venv 每次都是干净的，不存在状态残留问题。`pack_orc.sh` 的打包 venv
 位于 `BUILD_DIR/.packaging-venv`，随 `BUILD_DIR` 一起在每次打包时清理。
+
+## 第三方 LLM 引用移除 (Third-party LLM Reference Removal)
+
+README 文档与 `configure_llm.sh` 脚本同步去厂商化的过程（ADR-017）。脚本中
+`DEFAULT_LLM_MODEL` 和 `DEFAULT_LLM_URL` 已为空字符串（注释标注 "No third-party
+defaults"），但 README 仍残留阿里云通义千问（`qwen3.6-flash`、
+`dashscope.aliyuncs.com`）和智谱 GLM（`glm-5.1`、`open.bigmodel.cn`）等
+第三方厂商的模型名、API URL 和提供商表格。ADR-017 将 README 中的交互提示
+默认值方括号移除、"常见选择"/"Common choices" 表改为通用占位符表（
+`<model-name>`、`<api-url>`）、命令示例统一为占位符风格、"建议使用"块整块
+删除，使文档与脚本行为完全一致。此变更属于脚本层面去厂商化规范（见开发实践
+规范"移除第三方依赖引用规范"）在文档层面的同步延伸。
