@@ -96,6 +96,123 @@ ask_input_secret() {
     echo "${value:-$default}"
 }
 
+validate_llm() {
+    local model="$1"
+    local url="$2"
+    local api_key="$3"
+    
+    local test_url="${url}"
+    if [[ "${test_url}" != */chat/completions ]]; then
+        test_url="${test_url%/}/chat/completions"
+    fi
+    
+    log_info "Validating LLM connection..." >&2
+    log_info "  URL:   $test_url" >&2
+    log_info "  Model: $model" >&2
+    
+    local tmp_resp http_code body
+    tmp_resp=$(mktemp /tmp/llm-validate-XXXXXX)
+    http_code=$(curl -s -o "${tmp_resp}" -w "%{http_code}" \
+        -X POST "${test_url}" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${api_key}" \
+        -d "{\"model\": \"${model}\", \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"max_tokens\": 1}" \
+        --connect-timeout 10 \
+        --max-time 30 2>/dev/null) || http_code="000"
+    body=$(cat "${tmp_resp}" 2>/dev/null)
+    rm -f "${tmp_resp}"
+    
+    case "${http_code}" in
+        200|201)
+            log_info "  [OK] LLM API validation successful (HTTP ${http_code})." >&2
+            return 0
+            ;;
+        401|403)
+            log_error "  Authentication failed (HTTP ${http_code}) - invalid API key." >&2
+            [ -n "${body}" ] && log_info "  Response: $(printf '%.200s' "${body}")" >&2
+            return 1
+            ;;
+        404)
+            log_error "  Endpoint not found (HTTP 404) - invalid API URL." >&2
+            log_info "  Tried: ${test_url}" >&2
+            [ -n "${body}" ] && log_info "  Response: $(printf '%.200s' "${body}")" >&2
+            return 1
+            ;;
+        000)
+            log_error "  Cannot connect to ${test_url}." >&2
+            log_info "  Please check the URL and your network connection." >&2
+            return 1
+            ;;
+        *)
+            log_error "  Validation failed (HTTP ${http_code})." >&2
+            [ -n "${body}" ] && log_info "  Response: $(printf '%.200s' "${body}")" >&2
+            return 1
+            ;;
+    esac
+}
+
+ask_llm_config() {
+    local component_name="$1"
+    local -n model_ref=$2
+    local -n url_ref=$3
+    local -n apikey_ref=$4
+    
+    echo ""
+    log_info "Chat Model:"
+    model_ref=$(ask_input "  Model name (e.g., gpt-4, claude-3-opus)" "")
+    url_ref=$(ask_input "  API URL (e.g., https://api.openai.com/v1/chat/completions)" "")
+    apikey_ref=$(ask_input_secret "  API Key" "")
+    
+    if [ -z "$model_ref" ] || [ -z "$url_ref" ] || [ -z "$apikey_ref" ]; then
+        log_warn "LLM configuration incomplete, skipping validation."
+        return 0
+    fi
+    
+    while true; do
+        echo ""
+        log_info "Validating $component_name LLM configuration..."
+        if validate_llm "$model_ref" "$url_ref" "$apikey_ref"; then
+            log_info "LLM configuration validated successfully."
+            return 0
+        fi
+        
+        echo ""
+        log_warn "Validation failed. Please choose an option:"
+        echo "  1. Re-enter configuration"
+        echo "  2. Skip validation and continue"
+        echo "  3. Cancel $component_name configuration"
+        read -r -p "  Enter choice [1/2/3]: " choice
+        
+        case "$choice" in
+            1)
+                echo ""
+                log_info "Chat Model:"
+                model_ref=$(ask_input "  Model name (e.g., gpt-4, claude-3-opus)" "$model_ref")
+                url_ref=$(ask_input "  API URL (e.g., https://api.openai.com/v1/chat/completions)" "$url_ref")
+                apikey_ref=$(ask_input_secret "  API Key" "")
+                if [ -z "$model_ref" ] || [ -z "$url_ref" ] || [ -z "$apikey_ref" ]; then
+                    log_warn "LLM configuration incomplete, skipping validation."
+                    return 0
+                fi
+                ;;
+            2)
+                log_warn "Validation skipped. The configuration may not work correctly."
+                return 0
+                ;;
+            3)
+                log_info "$component_name LLM configuration cancelled."
+                model_ref=""
+                url_ref=""
+                apikey_ref=""
+                return 0
+                ;;
+            *)
+                log_warn "Invalid choice, please try again."
+                ;;
+        esac
+    done
+}
+
 ask_choice() {
     local prompt="$1"
     shift
@@ -639,12 +756,7 @@ fi
 if [ "$CONFIG_REGISTRY" = true ]; then
     echo ""
     log_step "[3/5] Registry Center LLM Configuration:"
-    
-    echo ""
-    log_info "Chat Model:"
-    CONFIG_REGISTRY_CHAT_MODEL=$(ask_input "  Model name (e.g., gpt-4, claude-3-opus)" "")
-    CONFIG_REGISTRY_CHAT_URL=$(ask_input "  API URL (e.g., https://api.openai.com/v1/chat/completions)" "")
-    CONFIG_REGISTRY_CHAT_APIKEY=$(ask_input_secret "  API Key" "")
+    ask_llm_config "Registry Center" CONFIG_REGISTRY_CHAT_MODEL CONFIG_REGISTRY_CHAT_URL CONFIG_REGISTRY_CHAT_APIKEY
 fi
 
 # Step 4: LLM Configuration for Orchestration Center
@@ -652,11 +764,25 @@ if [ "$CONFIG_ORCHESTRATION" = true ]; then
     echo ""
     log_step "[4/5] Orchestration Center LLM Configuration:"
     
-    echo ""
-    log_info "Chat Model:"
-    CONFIG_ORCH_CHAT_MODEL=$(ask_input "  Model name (e.g., gpt-4, claude-3-opus)" "")
-    CONFIG_ORCH_CHAT_URL=$(ask_input "  API URL (e.g., https://api.openai.com/v1/chat/completions)" "")
-    CONFIG_ORCH_CHAT_APIKEY=$(ask_input_secret "  API Key" "")
+    if [ "$CONFIG_REGISTRY" = true ] && [ -n "$CONFIG_REGISTRY_CHAT_APIKEY" ]; then
+        echo ""
+        if ask_yes_no "Use same LLM config for Orchestration Center?" "yes"; then
+            CONFIG_ORCH_CHAT_MODEL="$CONFIG_REGISTRY_CHAT_MODEL"
+            CONFIG_ORCH_CHAT_URL="$CONFIG_REGISTRY_CHAT_URL"
+            CONFIG_ORCH_CHAT_APIKEY="$CONFIG_REGISTRY_CHAT_APIKEY"
+            log_info "Using same LLM config as Registry Center."
+            
+            echo ""
+            log_info "Validating Orchestration Center LLM configuration..."
+            if ! validate_llm "$CONFIG_ORCH_CHAT_MODEL" "$CONFIG_ORCH_CHAT_URL" "$CONFIG_ORCH_CHAT_APIKEY"; then
+                log_warn "Validation failed for reused config. You can reconfigure later."
+            fi
+        else
+            ask_llm_config "Orchestration Center" CONFIG_ORCH_CHAT_MODEL CONFIG_ORCH_CHAT_URL CONFIG_ORCH_CHAT_APIKEY
+        fi
+    else
+        ask_llm_config "Orchestration Center" CONFIG_ORCH_CHAT_MODEL CONFIG_ORCH_CHAT_URL CONFIG_ORCH_CHAT_APIKEY
+    fi
 fi
 
 # Step 5: Agent Examples Server

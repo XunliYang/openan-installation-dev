@@ -15,7 +15,7 @@ openan-installation/
     ├── install.sh                   # Interactive installation tool
     ├── uninstall.sh                 # One-click uninstall script
     ├── openan-chart/                # Helm chart
-    └── QUICKSTART.md                # Quick start guide
+    └── QUICKSTART.md                # Containerized installation guide
 ```
 
 ## Installation Methods
