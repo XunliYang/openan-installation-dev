@@ -567,3 +567,53 @@ pack 脚本中 `pip download ... 2>&1 | sed 's/^/  /' || true` 结尾的 `|| tru
 移除了该 `|| true`，配合 `set -euo pipefail` 使下载失败在打包阶段立即中止。
 `WHEEL_COUNT > 0` 检查只能证明目录里有 wheel 文件，无法验证依赖完整性
 （见 ADR-018）。
+
+## 离线包脚本合并 (Offline Pack Script Merge)
+
+将分散在 `binary/registry-center/` 和 `binary/orchestration-center/` 中的离线
+安装/打包脚本合并到 `binary/offline_pack/` 中的统一脚本。合并后的脚本采用
+`--reg`/`--orc` flag 设计（与 `openan_install.sh` 一致），无 flag 时同时处理
+两个组件。合并产生四个文件：`install.sh`（合并 `install_orc.sh` +
+`install_reg.sh`）、`pack.sh`（合并 `pack_orc.sh` + `pack_reg.sh`）、
+`configure_llm.sh`（从 one-click 适配）、`uninstall.sh`（从 one-click 适配）。
+原有脚本保留不删除（见 ADR-020）。
+
+## Glob 目录定位 (Glob-based Directory Detection)
+
+离线模式下 `configure_llm.sh` 和 `uninstall.sh` 定位解压后项目目录的策略。
+tarball 解压后的目录名含版本号（如 `registry-center-1.0.0-linux/`），不是固定的
+`registry-center/`。脚本使用 shell glob 模式（如 `ls -d "${SCRIPT_DIR}"/registry-center-*
+2>/dev/null | head -1`）匹配版本化目录名，无需硬编码版本号。与 one-click 版本
+的固定路径（`${SCRIPT_DIR}/registry-center/common/config/llm_config.json`）不同。
+Glob 无状态、不引入隐式文件，比符号链接和路径文件传递更健壮（见 ADR-020）。
+
+## wheel 目录统一 (Wheel Directory Unification)
+
+将 `pack_reg.sh` 的 wheel 存放路径从 `wheels/` 改为 `vendor/wheels/`，与
+`pack_orc.sh` 保持一致。合并后的 `pack.sh` 对两个组件统一使用 `vendor/wheels/`，
+`install.sh` 统一从 `vendor/wheels/` 读取。为兼容旧版 tarball（wheel 在 `wheels/`
+中），`install.sh` 先查 `vendor/wheels/`，兜底查 `wheels/`（见 ADR-020）。
+
+## 离线包安装器 (Offline Pack Installer)
+
+`binary/offline_pack/install.sh`，合并 `install_orc.sh` 和 `install_reg.sh` 后的
+统一离线安装脚本。采用 `--reg`/`--orc` flag（无 flag = 两个组件），集成 LLM
+配置步骤（带跳过选项，调用 `configure_llm.sh`）、nginx HTTPS 反向代理配置
+（安装 orc 时）、`--orc` only 模式下的远程 registry URL 提示。假设 Python 3.12+、
+Node.js 20.19+、npm、nginx 已预装（离线机器无网络）。使用 ANSI 颜色码输出风格
+（见 ADR-020）。
+
+## 离线包打包器 (Offline Pack Packager)
+
+`binary/offline_pack/pack.sh`，合并 `pack_orc.sh` 和 `pack_reg.sh` 后的统一离线
+打包脚本。采用 `--reg`/`--orc` flag（无 flag = 分别打包两个组件），每个组件产出
+独立的 tarball 到 `dist/` 目录。根据 flag 选择性检查前置依赖（`--orc` 需要
+Node.js/npm，`--reg` 不需要）。wheel 统一存放到 `vendor/wheels/`（见 ADR-020）。
+
+## 离线包卸载器 (Offline Pack Uninstaller)
+
+`binary/offline_pack/uninstall.sh`，从 one-click `openan_uninstall.sh` 适配的
+卸载脚本。使用 Glob 模式定位版本化项目目录（如 `registry-center-*/`），
+全量卸载所有 OpenAN 进程、nginx 配置、项目目录和静态资源。不支持 `--reg`/`--orc`
+选择性卸载，支持 `--force` 跳过确认。使用 `set -uo pipefail`（不含 `-e`）实现
+容错卸载（见 ADR-020）。
