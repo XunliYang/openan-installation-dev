@@ -47,7 +47,7 @@
 
 #### 第二阶段：在离线机器上安装
 
-将 `install_orc.sh` 与离线包 `dist/orchestration-center-offline-bundle.tar.gz`
+将 `install_orc.sh` 与离线包 `dist/orchestration-center-1.0.0-linux.tar.gz`
 放在**同一目录**，直接运行安装脚本（无需手动解压）：
 
 ```bash
@@ -151,8 +151,8 @@ The resulting tarball contains:
 
 #### Phase 2: Install on the Offline Machine
 
-Put `install_orc.sh` and the offline bundle
-`dist/orchestration-center-offline-bundle.tar.gz` in the **same directory**,
+Put `install_orc.sh` and the offline package
+`dist/orchestration-center-1.0.0-linux.tar.gz` in the **same directory**,
 then run the installer directly (no manual extraction needed):
 
 ```bash

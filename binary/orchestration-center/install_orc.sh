@@ -102,20 +102,20 @@ echo -e "${YELLOW}Step 1: Finding offline package...${NC}"
 
 TARBALL=""
 # Check dist/ subdirectory first (pack_orc.sh default output location)
-for f in "${SCRIPT_DIR}"/dist/orchestration-center-offline-*.tar.gz; do
+for f in "${SCRIPT_DIR}"/dist/orchestration-center-*.tar.gz; do
     [ -f "$f" ] && TARBALL="$f" && break
 done
 # Then check script directory itself
 if [ -z "$TARBALL" ]; then
-    for f in "${SCRIPT_DIR}"/orchestration-center-offline-*.tar.gz; do
+    for f in "${SCRIPT_DIR}"/orchestration-center-*.tar.gz; do
         [ -f "$f" ] && TARBALL="$f" && break
     done
 fi
 
 if [ -z "$TARBALL" ]; then
     echo -e "${RED}Error: No orchestration-center tarball found.${NC}"
-    echo "       Searched: ${SCRIPT_DIR}/dist/orchestration-center-offline-*.tar.gz"
-    echo "       Searched: ${SCRIPT_DIR}/orchestration-center-offline-*.tar.gz"
+    echo "       Searched: ${SCRIPT_DIR}/dist/orchestration-center-*.tar.gz"
+    echo "       Searched: ${SCRIPT_DIR}/orchestration-center-*.tar.gz"
     echo "       Please run pack_orc.sh first to build the offline package."
     exit 1
 fi

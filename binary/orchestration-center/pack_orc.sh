@@ -36,10 +36,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_URL="https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz"
 SOURCE_VERSION="v1.0.0"
 
-BUNDLE_NAME="orchestration-center-offline-bundle"
-BUILD_DIR="${SCRIPT_DIR}/.offline-build"
-BUNDLE_DIR="${BUILD_DIR}/${BUNDLE_NAME}"
+# Defaults
+VERSION="1.0.0"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
+PKG_NAME="orchestration-center-${VERSION}-linux"
+BUILD_DIR="${OUTPUT_DIR}/build/${PKG_NAME}"
 
 # ─── Parse args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -123,9 +124,9 @@ echo ""
 
 # ─── Clean previous build ────────────────────────────────────────────────────
 echo -e "${YELLOW}Step 1: Cleaning previous build...${NC}"
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUNDLE_DIR"
-echo -e "  ${GREEN}✓${NC} Build directory ready: $BUNDLE_DIR"
+rm -rf "${OUTPUT_DIR}/build"
+mkdir -p "$BUILD_DIR"
+echo -e "  ${GREEN}✓${NC} Build directory ready: $BUILD_DIR"
 echo ""
 
 # ─── Download project source ───────────────────────────────────────────────
@@ -138,7 +139,7 @@ if ! curl -fsSL "${SOURCE_URL}" -o "${TMP_TAR}"; then
     exit 1
 fi
 
-# Extract to a temp source dir, then rsync to bundle dir with excludes
+# Extract to a temp source dir, then rsync to build dir with excludes
 TMP_SOURCE=$(mktemp -d /tmp/orchestration-center-src-XXXXXX)
 tar -xzf "${TMP_TAR}" -C "${TMP_SOURCE}" --strip-components=1
 rm -f "${TMP_TAR}"
@@ -146,7 +147,6 @@ rm -f "${TMP_TAR}"
 if command -v rsync &>/dev/null; then
     rsync -a \
         --exclude='.git' \
-        --exclude='.offline-build' \
         --exclude='__pycache__' \
         --exclude='*.pyc' \
         --exclude='.venv' \
@@ -158,16 +158,16 @@ if command -v rsync &>/dev/null; then
         --exclude='/log/' \
         --exclude='/run/' \
         --exclude='*.log' \
-        "$TMP_SOURCE/" "$BUNDLE_DIR/"
+        "$TMP_SOURCE/" "$BUILD_DIR/"
 else
     # Fallback: cp + manual cleanup
-    cp -r "$TMP_SOURCE"/* "$BUNDLE_DIR/"
-    cp -r "$TMP_SOURCE"/.??* "$BUNDLE_DIR/" 2>/dev/null || true
-    rm -rf "$BUNDLE_DIR/.git" "$BUNDLE_DIR/.offline-build"
-    find "$BUNDLE_DIR" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
-    find "$BUNDLE_DIR" -name '*.pyc' -delete 2>/dev/null || true
-    rm -rf "$BUNDLE_DIR/.venv" "$BUNDLE_DIR/venv" "$BUNDLE_DIR/workflow-designer/node_modules"
-    rm -rf "$BUNDLE_DIR/.pytest_cache" "$BUNDLE_DIR/.ruff_cache" "$BUNDLE_DIR/.mypy_cache"
+    cp -r "$TMP_SOURCE"/* "$BUILD_DIR/"
+    cp -r "$TMP_SOURCE"/.??* "$BUILD_DIR/" 2>/dev/null || true
+    rm -rf "$BUILD_DIR/.git"
+    find "$BUILD_DIR" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+    find "$BUILD_DIR" -name '*.pyc' -delete 2>/dev/null || true
+    rm -rf "$BUILD_DIR/.venv" "$BUILD_DIR/venv" "$BUILD_DIR/workflow-designer/node_modules"
+    rm -rf "$BUILD_DIR/.pytest_cache" "$BUILD_DIR/.ruff_cache" "$BUILD_DIR/.mypy_cache"
 fi
 rm -rf "$TMP_SOURCE"
 echo -e "  ${GREEN}✓${NC} Source downloaded and copied"
@@ -177,11 +177,12 @@ echo ""
 echo -e "${YELLOW}Step 3: Downloading Python wheels (x86_64 + aarch64)...${NC}"
 
 # Create a temporary packaging venv (only used for pip download, not bundled)
-PACKAGING_VENV="${BUILD_DIR}/.packaging-venv"
-"$PYTHON_BIN" -m venv "$PACKAGING_VENV"
-echo -e "  ${GREEN}✓${NC} Packaging venv created"
+VENV_PACKAGING_DIR=$(mktemp -d /tmp/pack-orc-venv-XXXXXX)
+trap 'rm -rf "$VENV_PACKAGING_DIR"' EXIT
+"$PYTHON_BIN" -m venv "$VENV_PACKAGING_DIR"
+echo -e "  ${GREEN}✓${NC} Packaging venv created: ${VENV_PACKAGING_DIR}"
 
-WHEELS_DIR="${BUNDLE_DIR}/vendor/wheels"
+WHEELS_DIR="${BUILD_DIR}/vendor/wheels"
 mkdir -p "$WHEELS_DIR"
 
 PYTHON_VERSION="3.12"
@@ -201,12 +202,12 @@ download_wheels_for_arch() {
     done
 
     echo -e "  ${YELLOW}Downloading binary wheels for ${arch_name}...${NC}"
-    "${PACKAGING_VENV}/bin/pip" install --upgrade pip wheel >/dev/null 2>&1
+    "${VENV_PACKAGING_DIR}/bin/pip" install --upgrade pip wheel >/dev/null 2>&1
     # NOTE: no '|| true' here — a failed download must abort the pack run so
     # the error surfaces at pack time, not at install time (see ADR-018).
     # With 'set -o pipefail' the pipeline propagates pip's exit code.
-    "${PACKAGING_VENV}/bin/pip" download \
-        -r "${BUNDLE_DIR}/requirements.txt" \
+    "${VENV_PACKAGING_DIR}/bin/pip" download \
+        -r "${BUILD_DIR}/requirements.txt" \
         "${flags[@]}" \
         --python-version "$PYTHON_VERSION" \
         --only-binary=:all: \
@@ -235,7 +236,7 @@ echo ""
 # ─── Prepare npm cache for offline frontend build ───────────────────────────
 echo -e "${YELLOW}Step 4: Preparing npm cache for offline frontend build...${NC}"
 
-FRONTEND_DIR="${BUNDLE_DIR}/workflow-designer"
+FRONTEND_DIR="${BUILD_DIR}/workflow-designer"
 cd "$FRONTEND_DIR"
 
 echo -e "  ${YELLOW}Running npm install to fill cache (this may take a while)...${NC}"
@@ -244,7 +245,7 @@ npm install --force
 echo -e "  ${GREEN}✓${NC} npm install completed (cache populated)"
 
 # Copy npm cache for offline use
-NPM_CACHE_DIR="${BUNDLE_DIR}/vendor/npm-cache"
+NPM_CACHE_DIR="${BUILD_DIR}/vendor/npm-cache"
 mkdir -p "$NPM_CACHE_DIR"
 npm cache verify 2>/dev/null || true
 NPM_GLOBAL_CACHE=$(npm config get cache 2>/dev/null || echo "")
@@ -263,13 +264,13 @@ echo ""
 
 # ─── Ensure bin scripts are executable ───────────────────────────────────────
 echo -e "${YELLOW}Step 5: Ensuring scripts are executable...${NC}"
-chmod +x "${BUNDLE_DIR}/bin/"*.sh 2>/dev/null || true
+chmod +x "${BUILD_DIR}/bin/"*.sh 2>/dev/null || true
 echo -e "  ${GREEN}✓${NC} Scripts are executable"
 echo ""
 
 # ─── Create bundle manifest ──────────────────────────────────────────────────
 echo -e "${YELLOW}Step 6: Creating manifest...${NC}"
-MANIFEST="${BUNDLE_DIR}/OFFLINE_BUNDLE_MANIFEST.txt"
+MANIFEST="${BUILD_DIR}/OFFLINE_BUNDLE_MANIFEST.txt"
 
 cat > "$MANIFEST" << EOF
 ============================================================
@@ -311,26 +312,25 @@ echo ""
 echo -e "${YELLOW}Step 7: Creating tarball...${NC}"
 
 mkdir -p "$OUTPUT_DIR"
-TARBALL="${OUTPUT_DIR}/${BUNDLE_NAME}.tar.gz"
+tar -czf "${OUTPUT_DIR}/${PKG_NAME}.tar.gz" -C "${OUTPUT_DIR}/build" "$PKG_NAME"
 
-# Go to build dir parent so the tarball has a clean top-level dir name
-cd "$BUILD_DIR"
-tar czf "$TARBALL" "$BUNDLE_NAME"
-cd "$SCRIPT_DIR"
+# Cleanup build directory
+rm -rf "${OUTPUT_DIR}/build"
 
+TARBALL="${OUTPUT_DIR}/${PKG_NAME}.tar.gz"
 TARBALL_SIZE=$(du -h "$TARBALL" | cut -f1)
 echo -e "  ${GREEN}✓${NC} Tarball created: $TARBALL ($TARBALL_SIZE)"
 echo ""
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo -e "${BLUE}========================================${NC}"
-echo -e "${GREEN}  Bundle created successfully!${NC}"
+echo -e "${GREEN}  Package built successfully!${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo "Output:  $TARBALL"
 echo "Size:    $TARBALL_SIZE"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Copy dist/${BUNDLE_NAME}.tar.gz and install_orc.sh to the air-gapped machine (USB, SCP, etc.)"
+echo "  1. Copy dist/${PKG_NAME}.tar.gz and install_orc.sh to the air-gapped machine (USB, SCP, etc.)"
 echo "  2. Install:  ./install_orc.sh"
 echo ""
