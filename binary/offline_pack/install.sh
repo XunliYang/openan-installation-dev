@@ -28,7 +28,7 @@
 # configures nginx HTTPS reverse proxy, and starts all services.
 #
 # Usage:
-#   ./install.sh              # Install both (default)
+#   ./install.sh              # Auto-detect and install available package(s)
 #   ./install.sh --reg        # Install only registry-center
 #   ./install.sh --orc        # Install only orchestration-center
 #   ./install.sh --reg --orc  # Install both
@@ -49,13 +49,15 @@ NC='\033[0m'
 
 # =============================================================================
 # Argument parsing: --reg | --orc | --help
-# --reg and --orc are boolean flags; if neither is specified, both are enabled.
+# --reg and --orc are boolean flags; if neither is specified, auto-detect mode
+# is enabled (search for available tarballs and install what's found, ADR-022).
 # Consistent with openan_install.sh's flag design.
 # =============================================================================
 REG_FLAG_SET=false
 ORC_FLAG_SET=false
-INSTALL_REGISTRY=true
-INSTALL_ORCHESTRATION=true
+AUTO_DETECT=false
+INSTALL_REGISTRY=false
+INSTALL_ORCHESTRATION=false
 USER_REGISTRY_URL=""
 START_SAMPLE=false
 
@@ -66,12 +68,12 @@ Usage: install.sh [OPTIONS]
 Options:
   --reg          Install registry-center
   --orc          Install orchestration-center
-                 (default: both --reg --orc if neither specified)
+                 (default: auto-detect available packages if neither specified)
   --sample       Start agents examples server (port 8080, off by default)
   -h, --help     Show this help message and exit
 
 Examples:
-  ./install.sh                 # Install everything (default: --reg --orc)
+  ./install.sh                 # Auto-detect and install available package(s)
   ./install.sh --reg           # Install only registry-center
   ./install.sh --orc           # Install only orchestration-center
   ./install.sh --reg --orc     # Install both
@@ -118,16 +120,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# If neither --reg nor --orc was specified, default to both
+# If neither --reg nor --orc was specified, enable auto-detect mode.
+# Step 1 will search for available tarballs and set flags accordingly (ADR-022).
 if [ "${REG_FLAG_SET}" = "false" ] && [ "${ORC_FLAG_SET}" = "false" ]; then
-    INSTALL_REGISTRY=true
-    INSTALL_ORCHESTRATION=true
-fi
-
-# --sample requires orchestration-center; warn and disable if not installing it.
-if [ "${START_SAMPLE}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "false" ]; then
-    echo -e "${YELLOW}  ⚠ --sample has no effect without --orc (sample requires orchestration-center).${NC}"
-    START_SAMPLE=false
+    AUTO_DETECT=true
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -256,10 +252,15 @@ echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}  OpenAN Offline Installer${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
-echo -e "  Install targets:"
-echo -e "    registry-center:       ${INSTALL_REGISTRY}"
-echo -e "    orchestration-center:  ${INSTALL_ORCHESTRATION}"
-echo -e "    sample agents:         ${START_SAMPLE}"
+if [ "${AUTO_DETECT}" = "true" ]; then
+    echo -e "  Mode: ${YELLOW}auto-detect${NC} (no --reg/--orc specified)"
+    echo -e "  Will search for available packages and install what's found."
+else
+    echo -e "  Install targets:"
+    echo -e "    registry-center:       ${INSTALL_REGISTRY}"
+    echo -e "    orchestration-center:  ${INSTALL_ORCHESTRATION}"
+fi
+echo -e "  sample agents:         ${START_SAMPLE}"
 echo ""
 
 # =============================================================================
@@ -270,28 +271,70 @@ echo -e "${YELLOW}Step 1: Finding offline packages...${NC}"
 REG_TARBALL=""
 ORC_TARBALL=""
 
-if [ "${INSTALL_REGISTRY}" = "true" ]; then
+if [ "${AUTO_DETECT}" = "true" ]; then
+    # Auto-detect mode: search for both tarballs, install what's found (ADR-022)
     REG_TARBALL=$(find_tarball "registry-center")
-    if [ -z "$REG_TARBALL" ]; then
-        echo -e "${RED}Error: No registry-center tarball found.${NC}"
+    ORC_TARBALL=$(find_tarball "orchestration-center")
+
+    if [ -n "$REG_TARBALL" ]; then
+        INSTALL_REGISTRY=true
+        echo -e "  ${GREEN}✓${NC} Found: ${REG_TARBALL}"
+    else
+        echo -e "  ${YELLOW}⚠ registry-center tarball not found.${NC}"
+    fi
+
+    if [ -n "$ORC_TARBALL" ]; then
+        INSTALL_ORCHESTRATION=true
+        echo -e "  ${GREEN}✓${NC} Found: ${ORC_TARBALL}"
+    else
+        echo -e "  ${YELLOW}⚠ orchestration-center tarball not found.${NC}"
+    fi
+
+    if [ "${INSTALL_REGISTRY}" = "false" ] && [ "${INSTALL_ORCHESTRATION}" = "false" ]; then
+        echo -e "${RED}Error: No offline packages found.${NC}"
         echo "       Searched: ${SCRIPT_DIR}/dist/registry-center-*.tar.gz"
         echo "       Searched: ${SCRIPT_DIR}/registry-center-*.tar.gz"
-        echo "       Please run pack.sh --reg first to build the offline package."
-        exit 1
-    fi
-    echo -e "  ${GREEN}✓${NC} Found: ${REG_TARBALL}"
-fi
-
-if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
-    ORC_TARBALL=$(find_tarball "orchestration-center")
-    if [ -z "$ORC_TARBALL" ]; then
-        echo -e "${RED}Error: No orchestration-center tarball found.${NC}"
         echo "       Searched: ${SCRIPT_DIR}/dist/orchestration-center-*.tar.gz"
         echo "       Searched: ${SCRIPT_DIR}/orchestration-center-*.tar.gz"
-        echo "       Please run pack.sh --orc first to build the offline package."
+        echo "       Please run pack.sh first to build offline packages."
         exit 1
     fi
-    echo -e "  ${GREEN}✓${NC} Found: ${ORC_TARBALL}"
+
+    echo ""
+    echo -e "  ${BLUE}Auto-detect result:${NC}"
+    echo -e "    registry-center:       ${INSTALL_REGISTRY}"
+    echo -e "    orchestration-center:  ${INSTALL_ORCHESTRATION}"
+else
+    if [ "${INSTALL_REGISTRY}" = "true" ]; then
+        REG_TARBALL=$(find_tarball "registry-center")
+        if [ -z "$REG_TARBALL" ]; then
+            echo -e "${RED}Error: No registry-center tarball found.${NC}"
+            echo "       Searched: ${SCRIPT_DIR}/dist/registry-center-*.tar.gz"
+            echo "       Searched: ${SCRIPT_DIR}/registry-center-*.tar.gz"
+            echo "       Please run pack.sh --reg first to build the offline package."
+            exit 1
+        fi
+        echo -e "  ${GREEN}✓${NC} Found: ${REG_TARBALL}"
+    fi
+
+    if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+        ORC_TARBALL=$(find_tarball "orchestration-center")
+        if [ -z "$ORC_TARBALL" ]; then
+            echo -e "${RED}Error: No orchestration-center tarball found.${NC}"
+            echo "       Searched: ${SCRIPT_DIR}/dist/orchestration-center-*.tar.gz"
+            echo "       Searched: ${SCRIPT_DIR}/orchestration-center-*.tar.gz"
+            echo "       Please run pack.sh --orc first to build the offline package."
+            exit 1
+        fi
+        echo -e "  ${GREEN}✓${NC} Found: ${ORC_TARBALL}"
+    fi
+fi
+
+# --sample requires orchestration-center; warn and disable if not installing it.
+# Checked after Step 1 because auto-detect mode resolves INSTALL_ORCHESTRATION there (ADR-022).
+if [ "${START_SAMPLE}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "false" ]; then
+    echo -e "${YELLOW}  ⚠ --sample has no effect without --orc (sample requires orchestration-center).${NC}"
+    START_SAMPLE=false
 fi
 echo ""
 
