@@ -57,6 +57,7 @@ ORC_FLAG_SET=false
 INSTALL_REGISTRY=true
 INSTALL_ORCHESTRATION=true
 USER_REGISTRY_URL=""
+START_SAMPLE=false
 
 print_usage() {
     cat << 'USAGE_EOF'
@@ -66,6 +67,7 @@ Options:
   --reg          Install registry-center
   --orc          Install orchestration-center
                  (default: both --reg --orc if neither specified)
+  --sample       Start agents examples server (port 8080, off by default)
   -h, --help     Show this help message and exit
 
 Examples:
@@ -73,6 +75,7 @@ Examples:
   ./install.sh --reg           # Install only registry-center
   ./install.sh --orc           # Install only orchestration-center
   ./install.sh --reg --orc     # Install both
+  ./install.sh --reg --orc --sample  # Install everything and start sample agents
 USAGE_EOF
 }
 
@@ -92,6 +95,10 @@ while [ $# -gt 0 ]; do
                 INSTALL_REGISTRY=false
                 INSTALL_ORCHESTRATION=true
             fi
+            shift
+            ;;
+        --sample)
+            START_SAMPLE=true
             shift
             ;;
         -h|--help)
@@ -117,12 +124,19 @@ if [ "${REG_FLAG_SET}" = "false" ] && [ "${ORC_FLAG_SET}" = "false" ]; then
     INSTALL_ORCHESTRATION=true
 fi
 
+# --sample requires orchestration-center; warn and disable if not installing it.
+if [ "${START_SAMPLE}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "false" ]; then
+    echo -e "${YELLOW}  ⚠ --sample has no effect without --orc (sample requires orchestration-center).${NC}"
+    START_SAMPLE=false
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CERT_PASSWORD="Dev@12345"
 
 # Initialize PIDs for dynamic summary
 REGISTRY_PID=""
 OC_BACKEND_PID=""
+AGENTS_PID=""
 NGINX_PID=""
 
 # =============================================================================
@@ -245,6 +259,7 @@ echo ""
 echo -e "  Install targets:"
 echo -e "    registry-center:       ${INSTALL_REGISTRY}"
 echo -e "    orchestration-center:  ${INSTALL_ORCHESTRATION}"
+echo -e "    sample agents:         ${START_SAMPLE}"
 echo ""
 
 # =============================================================================
@@ -658,6 +673,22 @@ if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
         echo -e "  ${YELLOW}⚠ server.conf not found at ${ORC_SERVER_CONF}, skipping registry URL fix.${NC}"
     fi
 fi
+
+# --- Sample Agents Interactive Prompt ---
+if [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "false" ]; then
+    echo ""
+    echo -e "  ${YELLOW}Sample agents server provides demo agents for testing (port 8080).${NC}"
+    read -r -p "        Start sample agents server? [y/N]: " START_SAMPLE_INPUT < /dev/tty || START_SAMPLE_INPUT=""
+    case "${START_SAMPLE_INPUT}" in
+        [yY]|[yY][eE][sS])
+            START_SAMPLE=true
+            echo -e "  ${GREEN}✓${NC} Sample agents server will be started."
+            ;;
+        *)
+            echo -e "  ${YELLOW}⚠ Sample agents server will not be started.${NC}"
+            ;;
+    esac
+fi
 echo ""
 
 # =============================================================================
@@ -760,6 +791,15 @@ fi
 # =============================================================================
 echo -e "${YELLOW}Step 9: Starting services...${NC}"
 
+# Clean all sample agent ports (defensive — residual samples.start_agents_server
+# processes from a previous --sample run can cause 404 on orchestration API routes).
+# See ADR-009 for the full 11-port sample agent architecture.
+if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
+    for sap in 8899 8900 8901 8902 8903 8904 8905 8906 8907 26335 26336; do
+        free_port "${sap}"
+    done
+fi
+
 # Start registry-center (port 5000)
 if [ "${INSTALL_REGISTRY}" = "true" ]; then
     free_port 5000
@@ -802,6 +842,27 @@ if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
     cd "$SCRIPT_DIR"
 fi
 
+# Start agents examples server (provides sample agents for testing)
+if [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "true" ]; then
+    AGENTS_PORT=8080
+    free_port "${AGENTS_PORT}"
+    echo -e "  ${YELLOW}Starting agents examples server (http://127.0.0.1:${AGENTS_PORT})...${NC}"
+    cd "$ORC_ROOT_DIR"
+    nohup "${ORC_VENV_DIR}/bin/python" -m samples.start_agents_server \
+        > "${ORC_ROOT_DIR}/log/agents-server.log" 2>&1 &
+    AGENTS_PID=$!
+    sleep 2
+    if kill -0 "$AGENTS_PID" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} Sample agents server started (PID: ${AGENTS_PID})"
+    else
+        echo -e "${RED}  Error: Sample agents server failed to start.${NC}"
+        echo "  Check log: ${ORC_ROOT_DIR}/log/agents-server.log"
+    fi
+    cd "$SCRIPT_DIR"
+elif [ "${INSTALL_ORCHESTRATION}" = "true" ] && [ "${START_SAMPLE}" = "false" ]; then
+    echo -e "  ${YELLOW}⚠ Sample agents server skipped (use --sample to enable).${NC}"
+fi
+
 # Start nginx (HTTPS reverse proxy on port 443)
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
     echo -e "  ${YELLOW}Starting nginx (https://localhost)...${NC}"
@@ -840,6 +901,9 @@ fi
 if [ -n "${OC_BACKEND_PID}" ]; then
     echo "  orchestration backend:  http://127.0.0.1:5001  (PID: ${OC_BACKEND_PID})"
 fi
+if [ -n "${AGENTS_PID}" ]; then
+    echo "  agents examples server: http://127.0.0.1:8080  (PID: ${AGENTS_PID})"
+fi
 if [ -n "${NGINX_PID}" ]; then
     echo "  nginx (HTTPS):          https://${VPS_IP}  (PID: ${NGINX_PID})"
 fi
@@ -853,6 +917,9 @@ if [ -n "${OC_BACKEND_PID}" ]; then
     echo "    backend:              ${ORC_ROOT_DIR}/log/backend.log"
     echo "    frontend build:       ${ORC_ROOT_DIR}/log/frontend-build.log"
 fi
+if [ -n "${AGENTS_PID}" ]; then
+    echo "    agents server:        ${ORC_ROOT_DIR}/log/agents-server.log"
+fi
 
 echo ""
 echo "  To stop:"
@@ -862,6 +929,9 @@ if [ -n "${REGISTRY_PID}" ]; then
 fi
 if [ -n "${OC_BACKEND_PID}" ]; then
     STOP_PIDS="${STOP_PIDS} ${OC_BACKEND_PID}"
+fi
+if [ -n "${AGENTS_PID}" ]; then
+    STOP_PIDS="${STOP_PIDS} ${AGENTS_PID}"
 fi
 STOP_PIDS="$(echo ${STOP_PIDS})"
 if [ -n "${STOP_PIDS}" ]; then

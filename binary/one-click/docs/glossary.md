@@ -615,5 +615,14 @@ Node.js/npm，`--reg` 不需要）。wheel 统一存放到 `vendor/wheels/`（�
 `binary/offline_pack/uninstall.sh`，从 one-click `openan_uninstall.sh` 适配的
 卸载脚本。使用 Glob 模式定位版本化项目目录（如 `registry-center-*/`），
 全量卸载所有 OpenAN 进程、nginx 配置、项目目录和静态资源。不支持 `--reg`/`--orc`
-选择性卸载，支持 `--force` 跳过确认。使用 `set -uo pipefail`（不含 `-e`）实现
-容错卸载（见 ADR-020）。
+选择性卸载，支持 `--force` 跳过确认。使用 `set -uo pipefail`（不含 `-e`）实现容错卸载（见 ADR-020）。
+
+## 离线包 --sample Flag (Offline Pack Sample Flag)
+
+`binary/offline_pack/install.sh` 的 `--sample` flag，参考 `openan_install.sh` 的
+`--sample` 设计。在离线安装时启动 `python -m samples.start_agents_server`（端口
+8080 + 11 个 A2A Agent 端口：8899-8907, 26335, 26336）。`--sample` 依赖
+`--orc`（sample 属于 orchestration-center），`--reg` only 模式下自动禁用并提示。
+未指定 `--sample` 时交互式询问用户 `[y/N]`。启动服务前防御性清理全部 11 个
+sample agent 端口（ADR-009），防止残留进程导致 404。不创建独立启动脚本，
+与 `openan_install.sh` 集成方式一致（见 ADR-021）。
