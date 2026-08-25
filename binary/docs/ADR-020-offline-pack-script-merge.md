@@ -160,5 +160,5 @@ bash "${SCRIPT_DIR}/configure_llm.sh" ${LLM_FLAGS}
 - `binary/registry-center/install_reg.sh` — 离线安装逻辑来源
 - `binary/orchestration-center/pack_orc.sh` — 离线打包逻辑来源
 - `binary/registry-center/pack_reg.sh` — 离线打包逻辑来源
-- `binary/one-click/docs/ADR-019-unify-bundle-naming-and-top-level-detection.md` — tarball 顶层目录检测
-- `binary/one-click/docs/ADR-011-cross-arch-offline-packaging.md` — 双架构 wheel 策略
+- `binary/docs/ADR-019-unify-bundle-naming-and-top-level-detection.md` — tarball 顶层目录检测
+- `binary/docs/ADR-011-cross-arch-offline-packaging.md` — 双架构 wheel 策略

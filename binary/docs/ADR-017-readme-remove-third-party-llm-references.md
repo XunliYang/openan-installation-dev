@@ -90,5 +90,5 @@ LLM_API_KEY=<your-api-key> ./configure_llm.sh --model <model-name> --url <url>
 
 - `binary/one-click/configure_llm.sh` — 已完成第三方内容清除的脚本（第 23-25 行）
 - `binary/one-click/README.md` — 本次修改的目标文件
-- `binary/one-click/docs/glossary.md` — 新增术语：第三方 LLM 引用移除
+- `binary/docs/glossary.md` — 新增术语：第三方 LLM 引用移除
 - 移除第三方依赖引用规范（开发实践规范）— 脚本层面的去厂商化规范，本次为文档层面同步

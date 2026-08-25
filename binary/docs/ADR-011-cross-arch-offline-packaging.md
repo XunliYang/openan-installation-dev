@@ -161,4 +161,4 @@ pack 脚本中执行 `npm install` 填充 cache 时，若失败则报错退出�
 - `binary/orchestration-center/install_offline.sh` — 新增架构检测，移除 rebuild flags
 - `binary/registry-center/README.md` — 更新文档
 - `binary/orchestration-center/README.md` — 更新文档
-- `binary/one-click/docs/glossary.md` — 新增术语：Architecture Normalization、Dual-arch Wheels、Wheel-only Strategy
+- `binary/docs/glossary.md` — 新增术语：Architecture Normalization、Dual-arch Wheels、Wheel-only Strategy

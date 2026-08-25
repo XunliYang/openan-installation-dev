@@ -134,4 +134,4 @@ Node.js 仍由 `resolve_node()` 自动安装（Step 0），因为 `npm install` 
 
 - `binary/one-click/openan_install.sh` — Step 3 新增 build + 部署到 /var/www/openan、Step 3.7 改 nginx 配置、Step 4 删 Vite 启动
 - `binary/one-click/openan_uninstall.sh` — 移除 3003 端口和 vite pattern、新增 /var/www/openan 清理
-- `binary/one-click/docs/glossary.md` — 新增术语：静态文件服务模式、SPA 路由回退、构建时依赖、dist 目录
+- `binary/docs/glossary.md` — 新增术语：静态文件服务模式、SPA 路由回退、构建时依赖、dist 目录

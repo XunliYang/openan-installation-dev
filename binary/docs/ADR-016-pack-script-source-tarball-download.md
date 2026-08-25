@@ -160,6 +160,6 @@ rm -f "${TMP_TAR}"
 - `binary/registry-center/pack_reg.sh` — 替换 `cp -r` 为 tarball 下载
 - `binary/orchestration-center/pack_orc.sh` — 替换 `rsync $ROOT_DIR/` 为 tarball 下载
 - `binary/one-click/openan_install.sh` — 已有的源码下载模式参考（Step 1）
-- `binary/one-click/docs/glossary.md` — 新增术语：Source Tarball Download、ROOT_DIR 去源码化
+- `binary/docs/glossary.md` — 新增术语：Source Tarball Download、ROOT_DIR 去源码化
 - `binary/registry-center/README.md` — 更新打包流程说明
 - `binary/orchestration-center/README.md` — 更新打包流程说明

@@ -597,11 +597,11 @@ Glob 无状态、不引入隐式文件，比符号链接和路径文件传递更
 ## 离线包安装器 (Offline Pack Installer)
 
 `binary/offline_pack/install.sh`，合并 `install_orc.sh` 和 `install_reg.sh` 后的
-统一离线安装脚本。采用 `--reg`/`--orc` flag（无 flag = 两个组件），集成 LLM
-配置步骤（带跳过选项，调用 `configure_llm.sh`）、nginx HTTPS 反向代理配置
-（安装 orc 时）、`--orc` only 模式下的远程 registry URL 提示。假设 Python 3.12+、
-Node.js 20.19+、npm、nginx 已预装（离线机器无网络）。使用 ANSI 颜色码输出风格
-（见 ADR-020）。
+统一离线安装脚本。采用 `--reg`/`--orc` flag，无 flag 时启用 Tarball 自动检测模式
+（搜索可用 tarball 并安装找到的组件，见 ADR-022）。集成 LLM 配置步骤（带跳过选项，
+调用 `configure_llm.sh`）、nginx HTTPS 反向代理配置（安装 orc 时）、`--orc` only
+模式下的远程 registry URL 提示。假设 Python 3.12+、Node.js 20.19+、npm、nginx
+已预装（离线机器无网络）。使用 ANSI 颜色码输出风格（见 ADR-020）。
 
 ## 离线包打包器 (Offline Pack Packager)
 
@@ -623,6 +623,26 @@ Node.js/npm，`--reg` 不需要）。wheel 统一存放到 `vendor/wheels/`（�
 `--sample` 设计。在离线安装时启动 `python -m samples.start_agents_server`（端口
 8080 + 11 个 A2A Agent 端口：8899-8907, 26335, 26336）。`--sample` 依赖
 `--orc`（sample 属于 orchestration-center），`--reg` only 模式下自动禁用并提示。
-未指定 `--sample` 时交互式询问用户 `[y/N]`。启动服务前防御性清理全部 11 个
-sample agent 端口（ADR-009），防止残留进程导致 404。不创建独立启动脚本，
-与 `openan_install.sh` 集成方式一致（见 ADR-021）。
+未指定 `--sample` 时交互式询问用户 `[y/N]`。`--sample` 依赖校验在 Step 1（自动检测）
+之后执行，因为自动检测模式下 `INSTALL_ORCHESTRATION` 在 Step 1 才确定（ADR-022）。
+启动服务前防御性清理全部 11 个 sample agent 端口（ADR-009），防止残留进程导致 404。
+不创建独立启动脚本，与 `openan_install.sh` 集成方式一致（见 ADR-021）。
+
+## Tarball 自动检测 (Tarball Auto-detection)
+
+`binary/offline_pack/install.sh` 无 flag（`--reg`/`--orc` 均未指定）时的安装目标
+确定机制（ADR-022）。脚本在 Step 1 同时搜索 registry-center 和 orchestration-center
+tarball（通过 `find_tarball` 函数，搜索 `dist/` 和脚本目录），按搜索结果设置
+`INSTALL_REGISTRY` / `INSTALL_ORCHESTRATION` 标志：
+
+| 搜索结果 | 安装行为 |
+|---------|---------|
+| 两个都找到 | 安装两个（等价于旧版无 flag 默认行为） |
+| 只找到 registry-center | 仅安装 registry-center |
+| 只找到 orchestration-center | 仅安装 orchestration-center |
+| 两个都没找到 | 打印提示信息并 `exit 1` |
+
+显式指定 `--reg` / `--orc` 时不触发自动检测，保持原有行为（找不到对应 tarball 即
+`exit 1`）。`--sample` 依赖校验从参数解析后移到 Step 1 之后，因为自动检测模式下
+`INSTALL_ORCHESTRATION` 在 Step 1 才确定。后续步骤（Step 2-10）通过条件标志自动
+适配，无需修改。`pack.sh` 不受影响（创建 tarball 而非查找，无自动检测场景）。

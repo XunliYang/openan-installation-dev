@@ -100,5 +100,5 @@ pip download 的 `--platform` 标签匹配机制无法识别这种格式，导�
 
 - `binary/orchestration-center/pack_orc.sh` — 删除 `--platform any` 通道、移除 `|| true`
 - `binary/registry-center/pack_reg.sh` — 删除 `--platform any` 通道、移除 `|| true`、补 pip 升级行
-- `binary/one-click/docs/ADR-011-cross-arch-offline-packaging.md` — wheel-only 双架构打包策略的背景（本 ADR 的下载通道即该策略的实施）
-- `binary/one-click/docs/glossary.md` — 新增术语：--platform any 通道、pip 整批解析、打包吞错
+- `binary/docs/ADR-011-cross-arch-offline-packaging.md` — wheel-only 双架构打包策略的背景（本 ADR 的下载通道即该策略的实施）
+- `binary/docs/glossary.md` — 新增术语：--platform any 通道、pip 整批解析、打包吞错

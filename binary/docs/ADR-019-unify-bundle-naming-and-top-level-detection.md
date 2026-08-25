@@ -112,5 +112,5 @@ nginx HTTPS → 启动服务）。删除"手动解压 + cd 进包内"的 6 步�
 - `binary/orchestration-center/install_orc.sh` — 搜索 dist/ 优先、tar -tzf 解析顶层目录 + 单顶层校验
 - `binary/registry-center/install_reg.sh` — 同样的顶层目录解析与校验加固
 - `binary/orchestration-center/README.md` — 中英两节第二阶段改外层包装模式、参数表对齐
-- `binary/one-click/docs/glossary.md` — 新增术语：顶层目录解析、外层包装安装器、打包产物 dist 目录
-- `binary/one-click/docs/ADR-014-frontend-static-serving.md` — 前端 build 产物 dist/ 的背景（注意与打包输出 dist/ 区分）
+- `binary/docs/glossary.md` — 新增术语：顶层目录解析、外层包装安装器、打包产物 dist 目录
+- `binary/docs/ADR-014-frontend-static-serving.md` — 前端 build 产物 dist/ 的背景（注意与打包输出 dist/ 区分）
