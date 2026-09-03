@@ -18,6 +18,132 @@ openan-installation/
     └── QUICKSTART.md                # Containerized installation guide
 ```
 
+## Architecture
+
+### Containerized Deployment (Kubernetes)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                       Kubernetes Cluster                         │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    Ingress (Nginx)                       │   │
+│  │  / → workflow-designer:80                                │   │
+│  │  /api/orchestrate/* → orchestration-center:5001          │   │
+│  │  /registry/* → registry-center:5000                      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│         ┌────────────────────┼────────────────────┐             │
+│         ▼                    ▼                    ▼             │
+│  ┌─────────────┐    ┌─────────────────┐  ┌──────────────┐     │
+│  │  Workflow   │    │  Orchestration  │  │   Registry   │     │
+│  │  Designer   │    │    Center       │  │   Center     │     │
+│  │  (Frontend) │    │                 │  │              │     │
+│  │             │    │  - LLM Chat     │  │  - LLM Chat  │     │
+│  │  - Nginx    │    │  - A2AT         │  │  - LLM Embed │     │
+│  │  - React    │    │  - Workflow     │  │  - LLM Rerank│     │
+│  │             │    │    Execution    │  │  - VectorDB  │     │
+│  │  Port: 80   │    │                 │  │              │     │
+│  │  HPA: 2-10  │    │  Port: 5001     │  │  Port: 5000  │     │
+│  └─────────────┘    │  HPA: 1-10      │  │  Replicas: 2 │     │
+│                     └─────────────────┘  └──────────────┘     │
+│                              │                    │             │
+│                              └────────┬───────────┘             │
+│                                       ▼                         │
+│                     ┌─────────────────────────────┐            │
+│                     │        PostgreSQL           │            │
+│                     │                             │            │
+│                     │  - registry_center DB       │            │
+│                     │  - orchestration_center DB  │            │
+│                     │  - PVC 20Gi                 │            │
+│                     │                             │            │
+│                     │  Port: 5432                 │            │
+│                     └─────────────────────────────┘            │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Components:**
+
+| Component | Description | Port | Replicas |
+|-----------|-------------|------|----------|
+| Workflow Designer | Frontend UI (React + Nginx) | 80 | 2 (HPA: 2-10) |
+| Orchestration Center | Workflow execution engine | 5001 | 1 (HPA: 1-10) |
+| Registry Center | Agent registration & discovery | 5000 | 2 |
+| PostgreSQL | Shared database | 5432 | 1 (StatefulSet) |
+
+**Features:**
+- Auto-detection: StorageClass, LoadBalancer, Ingress Controller
+- MetalLB auto-installation for bare-metal clusters
+- TLS certificates auto-generation (registry center)
+- HPA auto-scaling for frontend and orchestration
+- Optional VectorDB (Milvus) integration
+
+### Binary Deployment (Single Node)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                      Single Node / VM                            │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    Nginx (Port 443)                      │   │
+│  │  HTTPS reverse proxy with self-signed certificate        │   │
+│  │  / → /var/www/openan (static files)                     │   │
+│  │  /api/orchestrate/* → 127.0.0.1:5001                    │   │
+│  │  /registry/* → 127.0.0.1:5000                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│         ┌────────────────────┼────────────────────┐             │
+│         ▼                    ▼                    ▼             │
+│  ┌─────────────┐    ┌─────────────────┐  ┌──────────────┐     │
+│  │   Static    │    │  Orchestration  │  │   Registry   │     │
+│  │   Files     │    │    Center       │  │   Center     │     │
+│  │             │    │                 │  │              │     │
+│  │  /var/www/  │    │  Python venv    │  │  Python venv │     │
+│  │  openan/    │    │  Port: 5001     │  │  Port: 5000  │     │
+│  │  (React)    │    │  PID: dynamic   │  │  PID: dynamic│     │
+│  └─────────────┘    └─────────────────┘  └──────────────┘     │
+│                              │                    │             │
+│                              └────────┬───────────┘             │
+│                                       ▼                         │
+│                     ┌─────────────────────────────┐            │
+│                     │        PostgreSQL           │            │
+│                     │                             │            │
+│                     │  - registry_center DB       │            │
+│                     │  - orchestration_center DB  │            │
+│                     │                             │            │
+│                     │  Port: 5432                 │            │
+│                     └─────────────────────────────┘            │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Agents Server (Optional)                    │   │
+│  │  Sample agents for testing (Port 8080)                   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Components:**
+
+| Component | Description | Port | Process |
+|-----------|-------------|------|---------|
+| Nginx | HTTPS reverse proxy | 443 | systemd / manual |
+| Static Files | Frontend (React build) | - | Served by Nginx |
+| Orchestration Center | Workflow execution | 5001 | Python process |
+| Registry Center | Agent registration | 5000 | Python process |
+| PostgreSQL | Shared database | 5432 | System service |
+| Agents Server | Sample agents (optional) | 8080 | Python process |
+
+**Features:**
+- One-click installation with automatic dependency setup
+- Python 3.12+ auto-installation (apt/dnf/standalone)
+- Node.js 20.19+ auto-installation for frontend build
+- Self-signed SSL certificate generation
+- Automatic venv creation and dependency installation
+- Process management with PID tracking
+
 ## Installation Methods
 
 ### 1. Clustered Containerized Installation (Kubernetes)
