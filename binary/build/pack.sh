@@ -21,7 +21,7 @@
 # pack.sh - Unified offline packager for OpenAN
 #
 # Merges pack_orc.sh and pack_reg.sh into a single script with
-# --reg/--orc flag design (consistent with openan_install.sh).
+# --reg/--orc flag design (consistent with one-click install.sh).
 #
 # Run this on the ONLINE machine to build self-contained offline deployment
 # packages. Each component produces an independent tarball in dist/.
@@ -54,22 +54,37 @@ REG_FLAG_SET=false
 ORC_FLAG_SET=false
 PACK_REGISTRY=true
 PACK_ORCHESTRATION=true
+REG_VERSION_FLAG=""
+ORC_VERSION_FLAG=""
+REG_URL_FLAG=""
+ORC_URL_FLAG=""
 
 print_usage() {
     cat << 'USAGE_EOF'
 Usage: pack.sh [OPTIONS]
 
 Options:
-  --reg          Pack registry-center
-  --orc          Pack orchestration-center
-                 (default: both --reg --orc if neither specified)
-  -h, --help     Show this help message and exit
+  --reg            Pack registry-center
+  --orc            Pack orchestration-center
+                   (default: both --reg --orc if neither specified)
+  --reg-version <tag>  registry-center source tag (default: v1.0.0)
+  --orc-version <tag>  orchestration-center source tag (default: v1.0.0)
+  --reg-url <url>      registry-center source URL (default: derived from tag)
+  --orc-url <url>      orchestration-center source URL (default: derived from tag)
+  -h, --help       Show this help message and exit
+
+Version overrides (precedence: flag > env var > built-in default):
+  Environment equivalents: REGISTRY_VERSION, ORCHESTRATION_VERSION,
+  REGISTRY_SOURCE_URL, ORCHESTRATION_SOURCE_URL
+  Tags accept "v1.1.0" or "1.1.0"; the tarball name strips the leading "v".
 
 Examples:
   ./pack.sh                 # Pack everything (default: --reg --orc)
   ./pack.sh --reg           # Pack only registry-center
   ./pack.sh --orc           # Pack only orchestration-center
   ./pack.sh --reg --orc     # Pack both
+  ./pack.sh --orc --orc-version v1.1.0   # Pack orchestration-center v1.1.0
+  ORCHESTRATION_VERSION=1.1.0 ./pack.sh --orc
 USAGE_EOF
 }
 
@@ -90,6 +105,22 @@ while [ $# -gt 0 ]; do
                 PACK_ORCHESTRATION=true
             fi
             shift
+            ;;
+        --reg-version)
+            REG_VERSION_FLAG="$2"
+            shift 2
+            ;;
+        --orc-version)
+            ORC_VERSION_FLAG="$2"
+            shift 2
+            ;;
+        --reg-url)
+            REG_URL_FLAG="$2"
+            shift 2
+            ;;
+        --orc-url)
+            ORC_URL_FLAG="$2"
+            shift 2
             ;;
         -h|--help)
             print_usage
@@ -117,16 +148,68 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # =============================================================================
-# Constants
+# Constants & version/source resolution
 # =============================================================================
-VERSION="1.0.0"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 PYTHON_VERSION="3.12"
 
-REG_SOURCE_URL="https://github.com/project-openan/registry-center/archive/refs/tags/v1.0.0.tar.gz"
-REG_SOURCE_VERSION="v1.0.0"
-ORC_SOURCE_URL="https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz"
-ORC_SOURCE_VERSION="v1.0.0"
+# Built-in defaults, overridable via flags or env vars (precedence: flag > env > default)
+DEFAULT_REGISTRY_VERSION="v1.0.0"
+DEFAULT_ORCHESTRATION_VERSION="v1.0.0"
+REGISTRY_SOURCE_BASE="https://github.com/project-openan/registry-center/archive/refs/tags"
+ORCHESTRATION_SOURCE_BASE="https://github.com/project-openan/orchestration-center/archive/refs/tags"
+
+# Accept "v1.1.0" or "1.1.0" (plain numbers get the "v" prefix); pass custom tags through
+normalize_tag() {
+    case "$1" in
+        v*) echo "$1" ;;
+        [0-9]*) echo "v$1" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# --- registry-center: tag ---
+REGISTRY_VERSION_SOURCE="default"
+if [ -n "${REGISTRY_VERSION:-}" ]; then REGISTRY_VERSION_SOURCE="env"; fi
+if [ -n "${REG_VERSION_FLAG}" ]; then REGISTRY_VERSION_SOURCE="flag"; fi
+REGISTRY_VERSION="$(normalize_tag "${REG_VERSION_FLAG:-${REGISTRY_VERSION:-${DEFAULT_REGISTRY_VERSION}}}")"
+# Package (tarball) version is derived from the tag, with the leading "v" stripped
+REGISTRY_PKG_VERSION="${REGISTRY_VERSION#v}"
+
+# --- registry-center: source URL ---
+REGISTRY_URL_SOURCE="default"
+if [ -n "${REGISTRY_SOURCE_URL:-}" ]; then REGISTRY_URL_SOURCE="env"; fi
+if [ -n "${REG_URL_FLAG}" ]; then REGISTRY_URL_SOURCE="flag"; fi
+REGISTRY_SOURCE_URL="${REG_URL_FLAG:-${REGISTRY_SOURCE_URL:-${REGISTRY_SOURCE_BASE}/${REGISTRY_VERSION}.tar.gz}}"
+if [ "${REGISTRY_URL_SOURCE}" != "default" ]; then
+    case "${REGISTRY_SOURCE_URL}" in
+        *"${REGISTRY_VERSION}"*) ;;
+        *)
+            echo -e "${YELLOW}[WARN] Overridden registry-center URL does not contain tag ${REGISTRY_VERSION}; using it as-is.${NC}"
+            ;;
+    esac
+fi
+
+# --- orchestration-center: tag ---
+ORCHESTRATION_VERSION_SOURCE="default"
+if [ -n "${ORCHESTRATION_VERSION:-}" ]; then ORCHESTRATION_VERSION_SOURCE="env"; fi
+if [ -n "${ORC_VERSION_FLAG}" ]; then ORCHESTRATION_VERSION_SOURCE="flag"; fi
+ORCHESTRATION_VERSION="$(normalize_tag "${ORC_VERSION_FLAG:-${ORCHESTRATION_VERSION:-${DEFAULT_ORCHESTRATION_VERSION}}}")"
+ORCHESTRATION_PKG_VERSION="${ORCHESTRATION_VERSION#v}"
+
+# --- orchestration-center: source URL ---
+ORCHESTRATION_URL_SOURCE="default"
+if [ -n "${ORCHESTRATION_SOURCE_URL:-}" ]; then ORCHESTRATION_URL_SOURCE="env"; fi
+if [ -n "${ORC_URL_FLAG}" ]; then ORCHESTRATION_URL_SOURCE="flag"; fi
+ORCHESTRATION_SOURCE_URL="${ORC_URL_FLAG:-${ORCHESTRATION_SOURCE_URL:-${ORCHESTRATION_SOURCE_BASE}/${ORCHESTRATION_VERSION}.tar.gz}}"
+if [ "${ORCHESTRATION_URL_SOURCE}" != "default" ]; then
+    case "${ORCHESTRATION_SOURCE_URL}" in
+        *"${ORCHESTRATION_VERSION}"*) ;;
+        *)
+            echo -e "${YELLOW}[WARN] Overridden orchestration-center URL does not contain tag ${ORCHESTRATION_VERSION}; using it as-is.${NC}"
+            ;;
+    esac
+fi
 
 # Platform tags for each architecture (newer packages like cryptography require manylinux_2_28+)
 PIP_PLATFORMS_X86_64=(
@@ -175,7 +258,7 @@ download_wheels_for_arch() {
 # Pack registry-center
 # =============================================================================
 pack_registry() {
-    local pkg_name="registry-center-${VERSION}-linux"
+    local pkg_name="registry-center-${REGISTRY_PKG_VERSION}-linux"
     local build_dir="${OUTPUT_DIR}/build/${pkg_name}"
     local wheels_dir="${build_dir}/vendor/wheels"
 
@@ -190,11 +273,12 @@ pack_registry() {
     echo ""
 
     # Download project source
-    echo -e "${YELLOW}Downloading project source ${REG_SOURCE_VERSION}...${NC}"
+    echo -e "${YELLOW}Downloading project source ${REGISTRY_VERSION}...${NC}"
     local tmp_tar
     tmp_tar=$(mktemp /tmp/registry-center-source-XXXXXX.tar.gz)
-    if ! curl -fsSL "${REG_SOURCE_URL}" -o "${tmp_tar}"; then
-        echo -e "${RED}Error: Failed to download registry-center source ${REG_SOURCE_VERSION}.${NC}"
+    if ! curl -fsSL "${REGISTRY_SOURCE_URL}" -o "${tmp_tar}"; then
+        echo -e "${RED}Error: Failed to download registry-center source ${REGISTRY_VERSION} from:${NC}"
+        echo -e "${RED}  ${REGISTRY_SOURCE_URL}${NC}"
         rm -f "${tmp_tar}"
         exit 1
     fi
@@ -234,7 +318,7 @@ pack_registry() {
     echo -e "${YELLOW}Generating README_OFFLINE.txt...${NC}"
     cat > "${build_dir}/README_OFFLINE.txt" <<EOF
 ==========================================================
- Registry Center v${VERSION} - Offline Deployment Package
+ Registry Center v${REGISTRY_PKG_VERSION} - Offline Deployment Package
  Target: linux/x86_64, aarch64 | Python ${PYTHON_VERSION}
 ==========================================================
 
@@ -296,7 +380,7 @@ EOF
 # Pack orchestration-center
 # =============================================================================
 pack_orchestration() {
-    local pkg_name="orchestration-center-${VERSION}-linux"
+    local pkg_name="orchestration-center-${ORCHESTRATION_PKG_VERSION}-linux"
     local build_dir="${OUTPUT_DIR}/build/${pkg_name}"
     local wheels_dir="${build_dir}/vendor/wheels"
 
@@ -311,11 +395,12 @@ pack_orchestration() {
     echo ""
 
     # Download project source
-    echo -e "${YELLOW}Downloading project source ${ORC_SOURCE_VERSION}...${NC}"
+    echo -e "${YELLOW}Downloading project source ${ORCHESTRATION_VERSION}...${NC}"
     local tmp_tar
     tmp_tar=$(mktemp /tmp/orchestration-center-source-XXXXXX.tar.gz)
-    if ! curl -fsSL "${ORC_SOURCE_URL}" -o "${tmp_tar}"; then
-        echo -e "${RED}Error: Failed to download orchestration-center source ${ORC_SOURCE_VERSION}.${NC}"
+    if ! curl -fsSL "${ORCHESTRATION_SOURCE_URL}" -o "${tmp_tar}"; then
+        echo -e "${RED}Error: Failed to download orchestration-center source ${ORCHESTRATION_VERSION} from:${NC}"
+        echo -e "${RED}  ${ORCHESTRATION_SOURCE_URL}${NC}"
         rm -f "${tmp_tar}"
         exit 1
     fi
@@ -468,6 +553,11 @@ echo ""
 echo -e "  Pack targets:"
 echo -e "    registry-center:       ${PACK_REGISTRY}"
 echo -e "    orchestration-center:  ${PACK_ORCHESTRATION}"
+echo -e "  Sources (flag > env > default):"
+echo -e "    registry-center:       ${REGISTRY_VERSION} (${REGISTRY_VERSION_SOURCE})"
+echo -e "      ${REGISTRY_SOURCE_URL} (${REGISTRY_URL_SOURCE})"
+echo -e "    orchestration-center:  ${ORCHESTRATION_VERSION} (${ORCHESTRATION_VERSION_SOURCE})"
+echo -e "      ${ORCHESTRATION_SOURCE_URL} (${ORCHESTRATION_URL_SOURCE})"
 echo -e "  Target archs:    x86_64, aarch64"
 echo -e "  Python version:  ${PYTHON_VERSION}"
 echo -e "  Output:          ${OUTPUT_DIR}"
@@ -565,12 +655,12 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 if [ "${PACK_REGISTRY}" = "true" ]; then
-    REG_TARBALL="${OUTPUT_DIR}/registry-center-${VERSION}-linux.tar.gz"
+    REG_TARBALL="${OUTPUT_DIR}/registry-center-${REGISTRY_PKG_VERSION}-linux.tar.gz"
     REG_SIZE=$(du -h "$REG_TARBALL" | cut -f1)
     echo "  registry-center:        ${REG_TARBALL} (${REG_SIZE})"
 fi
 if [ "${PACK_ORCHESTRATION}" = "true" ]; then
-    ORC_TARBALL="${OUTPUT_DIR}/orchestration-center-${VERSION}-linux.tar.gz"
+    ORC_TARBALL="${OUTPUT_DIR}/orchestration-center-${ORCHESTRATION_PKG_VERSION}-linux.tar.gz"
     ORC_SIZE=$(du -h "$ORC_TARBALL" | cut -f1)
     echo "  orchestration-center:   ${ORC_TARBALL} (${ORC_SIZE})"
 fi

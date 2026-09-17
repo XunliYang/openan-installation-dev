@@ -21,7 +21,7 @@
 # install.sh - Unified offline installer for OpenAN
 #
 # Merges install_orc.sh and install_reg.sh into a single script with
-# --reg/--orc flag design (consistent with openan_install.sh).
+# --reg/--orc flag design (consistent with one-click install.sh).
 #
 # Finds tarballs produced by pack.sh, extracts them, creates venvs,
 # installs dependencies from local wheels, builds frontend from npm cache,
@@ -51,7 +51,7 @@ NC='\033[0m'
 # Argument parsing: --reg | --orc | --help
 # --reg and --orc are boolean flags; if neither is specified, auto-detect mode
 # is enabled (search for available tarballs and install what's found, ADR-022).
-# Consistent with openan_install.sh's flag design.
+# Consistent with one-click install.sh's flag design.
 # =============================================================================
 REG_FLAG_SET=false
 ORC_FLAG_SET=false
@@ -127,7 +127,11 @@ if [ "${REG_FLAG_SET}" = "false" ] && [ "${ORC_FLAG_SET}" = "false" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CERT_PASSWORD="Dev@12345"
+
+if [ -z "${CERT_PASSWORD:-}" ]; then
+    # /dev/urandom instead of openssl rand: offline machines may lack openssl
+    CERT_PASSWORD="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+fi
 
 # Initialize PIDs for dynamic summary
 REGISTRY_PID=""
@@ -529,19 +533,27 @@ REG_CERT_DIR="${REG_ROOT_DIR}/etc/cert"
 REG_SSL_DIR="${REG_ROOT_DIR}/etc/ssl"
 mkdir -p "$REG_CERT_DIR" "$REG_SSL_DIR"
 
-"${REG_VENV_DIR}/bin/python" -c "
+# CERT_PASSWORD is passed via the process environment, not the command line:
+# /proc/<pid>/cmdline is world-readable, environ is same-user/root only (ADR-023).
+REG_CERT_DIR="${REG_CERT_DIR}" CERT_PASSWORD="${CERT_PASSWORD}" "${REG_VENV_DIR}/bin/python" -c '
+import os
 import sys
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 from common.cert.certificate_generator import CertificateGenerator
 
-generator = CertificateGenerator(key_algorithm='RSA')
-if generator.generate_self_signed_cert('${REG_CERT_DIR}', 'serverAuth', '${CERT_PASSWORD}'):
-    print('  Certificate generated.')
+cert_dir = os.environ["REG_CERT_DIR"]
+cert_password = os.environ["CERT_PASSWORD"]
+generator = CertificateGenerator(key_algorithm="RSA")
+if generator.generate_self_signed_cert(cert_dir, "serverAuth", cert_password):
+    print("  Certificate generated.")
 else:
-    print('  Certificate already exists.')
-" || {
+    print("  Certificate already exists.")
+' || {
     echo -e "${YELLOW}  Warning: Certificate generation failed, continuing anyway.${NC}"
 }
+
+# Key is unencrypted at rest; protect it with 0600 permissions (ADR-023)
+chmod 600 "${REG_CERT_DIR}/server_key_RSA.pem" 2>/dev/null || true
 
 # Prepare SSL directory with certificate copies expected by server.conf
 cp -f "${REG_CERT_DIR}/server_RSA.cer" "${REG_SSL_DIR}/server.cer" 2>/dev/null || true

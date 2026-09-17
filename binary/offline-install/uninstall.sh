@@ -20,7 +20,7 @@
 # =============================================================================
 # uninstall.sh - Unified offline uninstaller for OpenAN
 #
-# Adapted from one-click openan_uninstall.sh with Glob-based directory
+# Adapted from one-click uninstall.sh with Glob-based directory
 # detection to handle versioned directory names (e.g. registry-center-1.0.0-linux/).
 #
 # Removes OpenAN project files, stops services, kills processes, and cleans

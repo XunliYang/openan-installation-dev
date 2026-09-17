@@ -1,6 +1,6 @@
 # OpenAN Offline Deployment Guide
 
-This directory provides a **two-phase offline deployment solution** for OpenAN, designed for air-gapped or network-restricted environments. Unlike the [one-click installer](../one-click/README.md) which downloads everything at install time, the offline packager pre-downloads all dependencies (Python wheels, npm cache, source code) on an **online machine**, producing self-contained tarballs that can be transferred to an **offline machine** and installed without any internet access.
+This directory provides the **offline installation scripts** for OpenAN, designed for air-gapped or network-restricted environments. Unlike the [one-click installer](../one-click/QUICKSTART.md) which downloads everything at install time, the offline workflow pre-downloads all dependencies (Python wheels, npm cache, source code) on an **online machine** using [`pack.sh`](../build/QUICKSTART.md) (located in `binary/build/`), producing self-contained tarballs that can be transferred to an **offline machine** and installed without any internet access.
 
 ---
 
@@ -13,6 +13,7 @@ This directory provides a **two-phase offline deployment solution** for OpenAN, 
 - [Script Reference](#script-reference)
 - [Interactive Prompts](#interactive-prompts)
 - [Service Ports and URLs](#service-ports-and-urls)
+- [Replacing the Self-Signed Certificate with a CA-Signed Certificate](#replacing-the-self-signed-certificate-with-a-ca-signed-certificate)
 - [Log File Locations](#log-file-locations)
 - [Stopping Services](#stopping-services)
 - [Uninstalling OpenAN](#uninstalling-openan)
@@ -35,6 +36,8 @@ This directory provides a **two-phase offline deployment solution** for OpenAN, 
  └───────────────────────┘          └───────────────────────┘
 ```
 
+> Phase 1 runs `pack.sh` from [`binary/build/`](../build/QUICKSTART.md); Phase 2 runs `install.sh` from this directory (`binary/offline-install/`, or wherever you transferred the scripts).
+
 Each component (registry-center, orchestration-center) is packed into an independent tarball containing:
 - Full project source code
 - Pre-downloaded Python wheels for **both x86_64 and aarch64** architectures
@@ -48,14 +51,7 @@ The install script auto-detects the target machine's architecture and installs t
 
 ### Packing Machine (Online)
 
-| Component | Minimum Version | Notes |
-|-----------|----------------|-------|
-| OS | Linux (x86_64 / aarch64) | — |
-| Python | 3.12+ | Required |
-| Node.js | 20.19+ + npm | Required for `--orc` (frontend cache) |
-| curl | Any | For source download |
-| tar | Any | For source extraction |
-| Internet | Required | Needs GitHub and PyPI access |
+See [build/QUICKSTART.md](../build/QUICKSTART.md). In short: Linux with Python 3.12+, Node.js 20.19+ + npm (for `--orc`), curl, tar, and internet access (GitHub and PyPI).
 
 ### Installing Machine (Offline / Air-Gapped)
 
@@ -74,48 +70,19 @@ The install script auto-detects the target machine's architecture and installs t
 
 ## Phase 1: Build Offline Packages (Online Machine)
 
-Run `pack.sh` on a machine with internet access to build self-contained tarballs.
-
-#### 1. Clone and enter the directory
+Run `pack.sh` (located in [`binary/build/`](../build/QUICKSTART.md)) on a machine with internet access to build self-contained tarballs.
 
 ```bash
 git clone https://github.com/project-openan/openan-installation.git
-cd openan-installation/binary/offline_pack
-```
-
-#### 2. Grant execute permission (if needed)
-
-```bash
+cd openan-installation/binary/build
 chmod +x pack.sh
-```
 
-#### 3. Run the packager
-
-```bash
 ./pack.sh              # Pack both components (default)
+./pack.sh --reg        # Pack only registry-center
+./pack.sh --orc        # Pack only orchestration-center
 ```
 
-Or pack individual components:
-
-| Flag | Description |
-|------|-------------|
-| `--reg` | Pack only registry-center |
-| `--orc` | Pack only orchestration-center |
-| (neither specified) | Default: pack both (equivalent to `--reg --orc`) |
-| `-h` / `--help` | Show help and exit |
-
-```bash
-# Examples
-./pack.sh                    # Pack everything (default)
-./pack.sh --reg              # Pack only registry-center
-./pack.sh --orc              # Pack only orchestration-center
-./pack.sh --reg --orc        # Pack both
-./pack.sh --help             # Show help
-```
-
-#### 4. Check the output
-
-Tarballs are produced in `dist/`:
+Tarballs are produced in `dist/` (i.e., `binary/build/dist/`):
 
 ```
 dist/
@@ -124,6 +91,8 @@ dist/
 ```
 
 Each tarball is fully self-contained — no additional downloads are needed at install time.
+
+> For prerequisites, the full list of flags, and details on what the script does, see [build/QUICKSTART.md](../build/QUICKSTART.md).
 
 ---
 
@@ -136,13 +105,13 @@ Transfer the tarballs and scripts to the offline machine, then install.
 Copy the following to the offline machine (USB, SCP, etc.):
 
 ```
-offline_pack/
+<transfer-directory>/
 ├── dist/
-│   ├── registry-center-1.0.0-linux.tar.gz      # from pack.sh
-│   └── orchestration-center-1.0.0-linux.tar.gz  # from pack.sh
-├── install.sh
-├── uninstall.sh
-└── configure_llm.sh
+│   ├── registry-center-1.0.0-linux.tar.gz       # from binary/build/dist/
+│   └── orchestration-center-1.0.0-linux.tar.gz  # from binary/build/dist/
+├── install.sh                                    # from binary/offline-install/
+├── uninstall.sh                                  # from binary/offline-install/
+└── configure_llm.sh                              # from binary/offline-install/
 ```
 
 > All files must be in the **same directory**. The install script searches for tarballs in `dist/` first, then in the script directory.
@@ -187,16 +156,11 @@ Or specify installation targets:
 
 ### pack.sh
 
-Run on the **online machine** to build offline packages.
+Located in `binary/build/`. Run on the **online machine** to build offline packages.
 
-**What it does:**
-1. Downloads project source from GitHub Release (via `curl` + `tar`, no `git clone`)
-2. Downloads Python wheels for both x86_64 and aarch64 (using `pip download` with manylinux platform tags)
-3. Runs `npm install` to populate the npm cache (orchestration-center only; `node_modules` are NOT bundled)
-4. Generates README/manifest inside the tarball
-5. Creates the tarball in `dist/`
+See [build/QUICKSTART.md](../build/QUICKSTART.md) for prerequisites, usage, and details on what the script does.
 
-**Output:** `dist/<component>-<version>-linux.tar.gz`
+**Output:** `dist/<component>-<version>-linux.tar.gz` (in `binary/build/dist/`)
 
 ### install.sh
 
@@ -304,7 +268,72 @@ After deployment, services are accessible at the following addresses:
 >
 > All backend services bind to `127.0.0.1` and cannot be accessed externally. **Nginx is the sole remote entry point** (listening on `0.0.0.0:443`), proxying to services via path prefixes: `/` → frontend, `/api/orchestrate/` → backend, `/registry/` → registry-center.
 >
-> Nginx uses a self-signed certificate. Browsers will show a security warning; choose "Proceed" to continue.
+> Nginx uses a self-signed certificate. Browsers will show a security warning; choose "Proceed" to continue. To remove the warning, see [Replacing the Self-Signed Certificate with a CA-Signed Certificate](#replacing-the-self-signed-certificate-with-a-ca-signed-certificate).
+
+---
+
+## Replacing the Self-Signed Certificate with a CA-Signed Certificate
+
+The installer generates self-signed certificates automatically. For production use, replace them with certificates issued by a trusted CA (your organization's internal CA or a public CA). There are **two separate certificates**:
+
+| Certificate | Files | Used by |
+|-------------|-------|---------|
+| Nginx entry-point | `/etc/nginx/ssl/cert.pem` (certificate), `/etc/nginx/ssl/key.pem` (private key) | Nginx HTTPS reverse proxy on port 443 — this is the certificate every remote client (browser, agent) sees |
+| registry-center internal | `registry-center-<version>-linux/etc/ssl/server.cer` (certificate), `etc/ssl/trust.cer` (CA trust chain), `etc/ssl/server_key.pem` (private key) | registry-center JWK signing, referenced by `jwk_private_key_path` in `server.conf` |
+
+Replacing the **Nginx certificate** removes the browser security warning and is what most deployments need. The registry-center internal certificate only needs replacement if your security policy requires CA-signed keys for service-to-service communication.
+
+> If your CA's root certificate is not already trusted on the air-gapped machine, import it into the system trust store first (e.g., `sudo cp ca-root.crt /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust` on RHEL/CentOS, or `/usr/local/share/ca-certificates/` + `update-ca-certificates` on Debian/Ubuntu).
+
+### 1. Obtain a CA-signed certificate
+
+Request a certificate for the hostname clients will use to reach the server (e.g., `openan.example.com` — the name must appear in the certificate's SAN; a bare IP address only works if your CA issues IP-SAN certificates). Transfer the issued files to the offline machine along with the CA chain. You need:
+
+- The certificate chain in PEM format (leaf + intermediates, often named `fullchain.pem`)
+- The private key in PEM format, **without a passphrase** — Nginx and the Python services run unattended and cannot prompt for a passphrase at startup. Protect the key with `600` file permissions instead (see ADR-023).
+
+### 2. Replace the Nginx certificate
+
+```bash
+# Back up the self-signed certificate
+sudo cp /etc/nginx/ssl/cert.pem /etc/nginx/ssl/cert.pem.bak
+sudo cp /etc/nginx/ssl/key.pem /etc/nginx/ssl/key.pem.bak
+
+# Install the CA-signed certificate (adjust the source file names to your CA's output)
+sudo cp fullchain.pem /etc/nginx/ssl/cert.pem
+sudo cp server.key /etc/nginx/ssl/key.pem
+sudo chmod 600 /etc/nginx/ssl/key.pem
+
+# Verify the certificate, then test and reload the Nginx configuration
+openssl x509 -in /etc/nginx/ssl/cert.pem -noout -subject -dates
+sudo nginx -t && sudo nginx -s reload
+```
+
+### 3. (Optional) Replace the registry-center internal certificate
+
+The registry-center reads its certificate from `etc/ssl/` inside its install directory (the installer writes the same files to `etc/cert/`; `server.conf` points to the `etc/ssl/` copies). Adjust the directory name to the actual version installed:
+
+```bash
+cd registry-center-1.0.0-linux   # adjust to the installed version
+
+# Back up, then replace (adjust the source file names to your CA's output)
+cp etc/ssl/server.cer etc/ssl/server.cer.bak
+cp etc/ssl/server_key.pem etc/ssl/server_key.pem.bak
+cp fullchain.pem etc/ssl/server.cer          # leaf + intermediate chain
+cp ca-chain.pem etc/ssl/trust.cer            # CA chain used to verify peers
+cp server.key etc/ssl/server_key.pem
+chmod 600 etc/ssl/server_key.pem
+
+# Restart the registry-center (it does not hot-reload certificates)
+kill "$(pgrep -f agent_registry.start)"
+nohup venv/bin/python -m agent_registry.start > log/registry-center.log 2>&1 &
+```
+
+### Notes
+
+- The installer only generates certificates when they do not already exist, so re-running it will **not** overwrite your CA-signed files.
+- These steps also apply to certificate renewal — repeat the copy and reload/restart steps with the renewed files.
+- Nginx reload (`nginx -s reload`) applies the new certificate without dropping connections; the registry-center must be restarted as shown above.
 
 ---
 

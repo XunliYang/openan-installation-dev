@@ -11,6 +11,7 @@ This script deploys the full OpenAN stack on a Linux server in one command, incl
 - [Script Execution Flow](#script-execution-flow)
 - [Interactive Prompts](#interactive-prompts)
 - [Service Ports and URLs](#service-ports-and-urls)
+- [Replacing the Self-Signed Certificate with a CA-Signed Certificate](#replacing-the-self-signed-certificate-with-a-ca-signed-certificate)
 - [Log File Locations](#log-file-locations)
 - [Stopping Services](#stopping-services)
 - [Uninstalling OpenAN](#uninstalling-openan)
@@ -45,13 +46,13 @@ cd openan-installation/binary/one-click
 #### 2. Grant execute permission (if needed)
 
 ```bash
-chmod +x openan_install.sh openan_uninstall.sh configure_llm.sh
+chmod +x install.sh uninstall.sh configure_llm.sh
 ```
 
 #### 3. Run the script
 
 ```bash
-./openan_install.sh
+./install.sh
 ```
 
 The script handles all downloads, configuration, and service startup automatically. There are a few interactive prompts during execution (see below); everything else is fully automated.
@@ -70,11 +71,11 @@ The script uses `--reg` and `--orc` flags to select installation targets, consis
 
 ```bash
 # Examples
-./openan_install.sh                    # Install everything (default: --reg --orc)
-./openan_install.sh --reg               # Install only registry-center
-./openan_install.sh --orc               # Install only orchestration-center
-./openan_install.sh --reg --orc --sample # Install everything and start sample agents
-./openan_install.sh --help              # Show help
+./install.sh                    # Install everything (default: --reg --orc)
+./install.sh --reg               # Install only registry-center
+./install.sh --orc               # Install only orchestration-center
+./install.sh --reg --orc --sample # Install everything and start sample agents
+./install.sh --help              # Show help
 ```
 
 > In `--orc` mode (without `--reg`), the script prompts for the URL of the running registry-center (default `https://127.0.0.1:5000`). The URL is written as-is to `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion.
@@ -104,8 +105,8 @@ The script uses `--reg` and `--orc` flags to select installation targets, consis
 To completely uninstall OpenAN (stop all processes, clean nginx configuration, remove project directories), use the uninstall script:
 
 ```bash
-./openan_uninstall.sh           # Interactive confirmation
-./openan_uninstall.sh --force   # Skip confirmation (for automation)
+./uninstall.sh           # Interactive confirmation
+./uninstall.sh --force   # Skip confirmation (for automation)
 ```
 
 > The uninstall script **preserves environment tools** (Python, Node.js, npm, nginx) for faster reinstallation. See [Uninstalling OpenAN](#uninstalling-openan) for details.
@@ -134,20 +135,32 @@ To completely uninstall OpenAN (stop all processes, clean nginx configuration, r
 
 #### Step 1: Download Component Source
 
-Downloads and extracts from GitHub Release (using `curl` + `tar`, no `git clone` dependency):
+Downloads and extracts from GitHub Release (using `curl` + `tar`, no `git clone` dependency).
+
+Defaults (overridable; precedence: flag > env var > built-in default):
 
 | Component | Download URL | Version |
 |-----------|-------------|---------|
 | registry-center | `https://github.com/project-openan/registry-center/archive/refs/tags/v1.0.0.tar.gz` | v1.0.0 |
 | orchestration-center | `https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz` | v1.0.0 |
 
-> If the directory already exists and is non-empty, the download is skipped.
+Override the tag or full URL per component (e.g. to pin a newer release or use a mirror):
+
+```bash
+./install.sh --reg --reg-version v1.1.0                                # flag
+ORCHESTRATION_VERSION=1.1.0 ./install.sh --orc                          # env var ("v" prefix optional)
+./install.sh --reg --reg-version v1.1.0 --reg-url https://mirror.example.com/registry-center-v1.1.0.tar.gz
+```
+
+Environment equivalents: `REGISTRY_VERSION`, `ORCHESTRATION_VERSION`, `REGISTRY_SOURCE_URL`, `ORCHESTRATION_SOURCE_URL`. Run `./install.sh --help` for details.
+
+> If the directory already exists and is non-empty, the download is skipped. A `.source-version` marker records the installed tag; if it differs from the requested one, a warning with switch instructions is printed.
 
 #### Step 2: Configure registry-center
 
 1. Create a Python virtual environment (venv)
 2. Install Python dependencies (`pip install -r requirements.txt`)
-3. Generate self-signed certificate (RSA, serverAuth, password `Dev@12345`)
+3. Generate self-signed certificate (RSA, serverAuth; password sourced from the `CERT_PASSWORD` env var or randomly generated per install — never hard-coded, see ADR-023)
 4. Prepare SSL directory (`etc/ssl/`), copy certificates and set 0600 permissions
 5. Fix `jwk_private_key_path` in `server.conf`
 6. Run `python -m agent_registry.init` initialization (automated input with defaults, no user interaction needed)
@@ -351,7 +364,71 @@ After deployment, services are accessible at the following addresses:
 >
 > All backend services bind to `127.0.0.1` and cannot be accessed externally. **Nginx is the sole remote entry point** (listening on `0.0.0.0:443`), proxying to services via path prefixes: `/` → frontend, `/api/orchestrate/` → backend, `/registry/` → registry-center. The agents example server has no nginx proxy and is not remotely accessible.
 >
-> Nginx uses a self-signed certificate. Browsers will show a security warning; choose "Proceed" to continue.
+> Nginx uses a self-signed certificate. Browsers will show a security warning; choose "Proceed" to continue. To remove the warning, see [Replacing the Self-Signed Certificate with a CA-Signed Certificate](#replacing-the-self-signed-certificate-with-a-ca-signed-certificate).
+
+---
+
+### Replacing the Self-Signed Certificate with a CA-Signed Certificate
+
+The installer generates self-signed certificates automatically. For production use, replace them with certificates issued by a trusted CA (your organization's internal CA or a public CA). There are **two separate certificates**:
+
+| Certificate | Files | Used by |
+|-------------|-------|---------|
+| Nginx entry-point | `/etc/nginx/ssl/cert.pem` (certificate), `/etc/nginx/ssl/key.pem` (private key) | Nginx HTTPS reverse proxy on port 443 — this is the certificate every remote client (browser, agent) sees |
+| registry-center internal | `registry-center/etc/ssl/server.cer` (certificate), `etc/ssl/trust.cer` (CA trust chain), `etc/ssl/server_key.pem` (private key) | registry-center JWK signing, referenced by `jwk_private_key_path` in `server.conf` |
+
+Replacing the **Nginx certificate** removes the browser security warning and is what most deployments need. The registry-center internal certificate only needs replacement if your security policy requires CA-signed keys for service-to-service communication.
+
+#### 1. Obtain a CA-signed certificate
+
+Request a certificate for the hostname clients will use to reach the server (e.g., `openan.example.com` — the name must appear in the certificate's SAN; a bare IP address only works if your CA issues IP-SAN certificates). You need:
+
+- The certificate chain in PEM format (leaf + intermediates, often named `fullchain.pem`)
+- The private key in PEM format, **without a passphrase** — Nginx and the Python services run unattended and cannot prompt for a passphrase at startup. Protect the key with `600` file permissions instead (see ADR-023).
+
+#### 2. Replace the Nginx certificate
+
+```bash
+# Back up the self-signed certificate
+sudo cp /etc/nginx/ssl/cert.pem /etc/nginx/ssl/cert.pem.bak
+sudo cp /etc/nginx/ssl/key.pem /etc/nginx/ssl/key.pem.bak
+
+# Install the CA-signed certificate (adjust the source file names to your CA's output)
+sudo cp fullchain.pem /etc/nginx/ssl/cert.pem
+sudo cp server.key /etc/nginx/ssl/key.pem
+sudo chmod 600 /etc/nginx/ssl/key.pem
+
+# Verify the certificate, then test and reload the Nginx configuration
+openssl x509 -in /etc/nginx/ssl/cert.pem -noout -subject -dates
+sudo nginx -t && sudo nginx -s reload
+```
+
+#### 3. (Optional) Replace the registry-center internal certificate
+
+The registry-center reads its certificate from `etc/ssl/` inside its install directory (the installer writes the same files to `etc/cert/`; `server.conf` points to the `etc/ssl/` copies):
+
+```bash
+cd registry-center
+
+# Back up, then replace (adjust the source file names to your CA's output)
+cp etc/ssl/server.cer etc/ssl/server.cer.bak
+cp etc/ssl/server_key.pem etc/ssl/server_key.pem.bak
+cp fullchain.pem etc/ssl/server.cer          # leaf + intermediate chain
+cp ca-chain.pem etc/ssl/trust.cer            # CA chain used to verify peers
+cp server.key etc/ssl/server_key.pem
+chmod 600 etc/ssl/server_key.pem
+
+# Restart the registry-center (it does not hot-reload certificates)
+kill "$(pgrep -f agent_registry.start)"
+source venv/bin/activate
+nohup python -m agent_registry.start > registry-center.log 2>&1 &
+```
+
+#### Notes
+
+- The installer only generates certificates when they do not already exist, so re-running it will **not** overwrite your CA-signed files.
+- These steps also apply to certificate renewal — repeat the copy and reload/restart steps with the renewed files.
+- Nginx reload (`nginx -s reload`) applies the new certificate without dropping connections; the registry-center must be restarted as shown above.
 
 ---
 
@@ -389,14 +466,14 @@ sudo nginx -s stop
 ### Uninstalling OpenAN
 
 To completely uninstall OpenAN projects (remove project directories, stop all processes,
-and clean nginx configuration), use the `openan_uninstall.sh` script.
+and clean nginx configuration), use the `uninstall.sh` script.
 **Environment tools (Python, Node.js, npm, nginx) are preserved** for faster reinstallation.
 
 #### Usage
 
 ```bash
-./openan_uninstall.sh           # Interactive confirmation
-./openan_uninstall.sh --force   # Skip confirmation (for automation)
+./uninstall.sh           # Interactive confirmation
+./uninstall.sh --force   # Skip confirmation (for automation)
 ```
 
 #### What Gets Removed
@@ -421,7 +498,7 @@ The following are **not deleted**, for faster reinstallation:
 
 #### Interactive Confirmation
 
-When running `./openan_uninstall.sh`, the script first scans the system and lists all
+When running `./uninstall.sh`, the script first scans the system and lists all
 planned actions:
 
 ```

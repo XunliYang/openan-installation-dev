@@ -1,4 +1,22 @@
 #!/bin/bash
+
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 # =============================================================================
 # Development environment setup script
 # Downloads registry-center & orchestration-center releases, creates venvs, and starts all services.
@@ -18,23 +36,38 @@ INSTALL_REGISTRY=true
 INSTALL_ORCHESTRATION=true
 USER_REGISTRY_URL=""
 START_SAMPLE=false
+REG_VERSION_FLAG=""
+ORC_VERSION_FLAG=""
+REG_URL_FLAG=""
+ORC_URL_FLAG=""
 
 print_usage() {
     cat << 'USAGE_EOF'
-Usage: openan_install.sh [OPTIONS]
+Usage: install.sh [OPTIONS]
 
 Options:
-  --reg          Install registry-center
-  --orc          Install orchestration-center
-                 (default: both --reg --orc if neither specified)
-  --sample       Start agents examples server (port 8080, off by default)
-  -h, --help     Show this help message and exit
+  --reg            Install registry-center
+  --orc            Install orchestration-center
+                   (default: both --reg --orc if neither specified)
+  --sample         Start agents examples server (port 8080, off by default)
+  --reg-version <tag>  registry-center source tag (default: v1.0.0)
+  --orc-version <tag>  orchestration-center source tag (default: v1.0.0)
+  --reg-url <url>      registry-center source URL (default: derived from tag)
+  --orc-url <url>      orchestration-center source URL (default: derived from tag)
+  -h, --help       Show this help message and exit
+
+Version overrides (precedence: flag > env var > built-in default):
+  Environment equivalents: REGISTRY_VERSION, ORCHESTRATION_VERSION,
+  REGISTRY_SOURCE_URL, ORCHESTRATION_SOURCE_URL
+  Tags accept "v1.1.0" or "1.1.0".
 
 Examples:
-  ./openan_install.sh                 # Install everything (default: --reg --orc)
-  ./openan_install.sh --reg           # Install only registry-center
-  ./openan_install.sh --orc           # Install only orchestration-center
-  ./openan_install.sh --reg --orc --sample  # Install everything and start sample agents
+  ./install.sh                 # Install everything (default: --reg --orc)
+  ./install.sh --reg           # Install only registry-center
+  ./install.sh --orc           # Install only orchestration-center
+  ./install.sh --reg --orc --sample  # Install everything and start sample agents
+  ./install.sh --reg-version v1.1.0   # Install registry-center v1.1.0
+  ORCHESTRATION_VERSION=1.1.0 ./install.sh --orc
 USAGE_EOF
 }
 
@@ -60,23 +93,39 @@ while [ $# -gt 0 ]; do
             START_SAMPLE=true
             shift
             ;;
+        --reg-version)
+            REG_VERSION_FLAG="$2"
+            shift 2
+            ;;
+        --orc-version)
+            ORC_VERSION_FLAG="$2"
+            shift 2
+            ;;
+        --reg-url)
+            REG_URL_FLAG="$2"
+            shift 2
+            ;;
+        --orc-url)
+            ORC_URL_FLAG="$2"
+            shift 2
+            ;;
         -h|--help)
             print_usage
             exit 0
             ;;
         --all)
             echo "[ERROR] --all has been removed. Use --reg --orc (or no flags) instead."
-            echo "        See: ./openan_install.sh --help"
+            echo "        See: ./install.sh --help"
             exit 1
             ;;
         --register)
             echo "[ERROR] --register has been removed. Use --reg instead."
-            echo "        See: ./openan_install.sh --help"
+            echo "        See: ./install.sh --help"
             exit 1
             ;;
         --orchestrate)
             echo "[ERROR] --orchestrate has been removed. Use --orc instead."
-            echo "        See: ./openan_install.sh --help"
+            echo "        See: ./install.sh --help"
             exit 1
             ;;
         *)
@@ -100,24 +149,84 @@ if [ "${START_SAMPLE}" = "true" ] && [ "${INSTALL_ORCHESTRATION}" = "false" ]; t
     START_SAMPLE=false
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK_DIR="${SCRIPT_DIR}"
+
+# =============================================================================
+# Version / source URL resolution
+# Precedence: flag > env var > built-in default (same pattern as ADR-023)
+# =============================================================================
+DEFAULT_REGISTRY_VERSION="v1.0.0"
+DEFAULT_ORCHESTRATION_VERSION="v1.0.0"
+REGISTRY_SOURCE_BASE="https://github.com/project-openan/registry-center/archive/refs/tags"
+ORCHESTRATION_SOURCE_BASE="https://github.com/project-openan/orchestration-center/archive/refs/tags"
+
+# Accept "v1.1.0" or "1.1.0" (plain numbers get the "v" prefix); pass custom tags through
+normalize_tag() {
+    case "$1" in
+        v*) echo "$1" ;;
+        [0-9]*) echo "v$1" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# --- registry-center ---
+REGISTRY_VERSION_SOURCE="default"
+if [ -n "${REGISTRY_VERSION:-}" ]; then REGISTRY_VERSION_SOURCE="env"; fi
+if [ -n "${REG_VERSION_FLAG}" ]; then REGISTRY_VERSION_SOURCE="flag"; fi
+REGISTRY_VERSION="$(normalize_tag "${REG_VERSION_FLAG:-${REGISTRY_VERSION:-${DEFAULT_REGISTRY_VERSION}}}")"
+
+REGISTRY_URL_SOURCE="default"
+if [ -n "${REGISTRY_SOURCE_URL:-}" ]; then REGISTRY_URL_SOURCE="env"; fi
+if [ -n "${REG_URL_FLAG}" ]; then REGISTRY_URL_SOURCE="flag"; fi
+REGISTRY_SOURCE_URL="${REG_URL_FLAG:-${REGISTRY_SOURCE_URL:-${REGISTRY_SOURCE_BASE}/${REGISTRY_VERSION}.tar.gz}}"
+if [ "${REGISTRY_URL_SOURCE}" != "default" ]; then
+    case "${REGISTRY_SOURCE_URL}" in
+        *"${REGISTRY_VERSION}"*) ;;
+        *)
+            echo "[WARN] Overridden registry-center URL does not contain tag ${REGISTRY_VERSION}; using it as-is."
+            ;;
+    esac
+fi
+
+# --- orchestration-center ---
+ORCHESTRATION_VERSION_SOURCE="default"
+if [ -n "${ORCHESTRATION_VERSION:-}" ]; then ORCHESTRATION_VERSION_SOURCE="env"; fi
+if [ -n "${ORC_VERSION_FLAG}" ]; then ORCHESTRATION_VERSION_SOURCE="flag"; fi
+ORCHESTRATION_VERSION="$(normalize_tag "${ORC_VERSION_FLAG:-${ORCHESTRATION_VERSION:-${DEFAULT_ORCHESTRATION_VERSION}}}")"
+
+ORCHESTRATION_URL_SOURCE="default"
+if [ -n "${ORCHESTRATION_SOURCE_URL:-}" ]; then ORCHESTRATION_URL_SOURCE="env"; fi
+if [ -n "${ORC_URL_FLAG}" ]; then ORCHESTRATION_URL_SOURCE="flag"; fi
+ORCHESTRATION_SOURCE_URL="${ORC_URL_FLAG:-${ORCHESTRATION_SOURCE_URL:-${ORCHESTRATION_SOURCE_BASE}/${ORCHESTRATION_VERSION}.tar.gz}}"
+if [ "${ORCHESTRATION_URL_SOURCE}" != "default" ]; then
+    case "${ORCHESTRATION_SOURCE_URL}" in
+        *"${ORCHESTRATION_VERSION}"*) ;;
+        *)
+            echo "[WARN] Overridden orchestration-center URL does not contain tag ${ORCHESTRATION_VERSION}; using it as-is."
+            ;;
+    esac
+fi
+
 echo "[MODE] Install targets:"
 echo "       registry-center:       ${INSTALL_REGISTRY}"
 echo "       orchestration-center:  ${INSTALL_ORCHESTRATION}"
 echo "       agents sample:         ${START_SAMPLE}"
+echo "       sources (flag > env > default):"
+echo "         registry-center:       ${REGISTRY_VERSION} (${REGISTRY_VERSION_SOURCE})"
+echo "           ${REGISTRY_SOURCE_URL} (${REGISTRY_URL_SOURCE})"
+echo "         orchestration-center:  ${ORCHESTRATION_VERSION} (${ORCHESTRATION_VERSION_SOURCE})"
+echo "           ${ORCHESTRATION_SOURCE_URL} (${ORCHESTRATION_URL_SOURCE})"
 echo ""
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${SCRIPT_DIR}"
-
-REGISTRY_RELEASE_URL="https://github.com/project-openan/registry-center/archive/refs/tags/v1.0.0.tar.gz"
-REGISTRY_VERSION="v1.0.0"
-ORCHESTRATION_RELEASE_URL="https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz"
-ORCHESTRATION_VERSION="v1.0.0"
 
 REGISTRY_DIR="${WORK_DIR}/registry-center"
 ORCHESTRATION_DIR="${WORK_DIR}/orchestration-center"
 
-CERT_PASSWORD="Dev@12345"
+
+if [ -z "${CERT_PASSWORD:-}" ]; then
+    # /dev/urandom instead of openssl rand: no external binary dependency
+    CERT_PASSWORD="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+fi
 
 # =============================================================================
 # Python 3.12+ resolution functions
@@ -891,17 +1000,30 @@ echo "=========================================="
 
 if [ "${INSTALL_REGISTRY}" = "true" ]; then
 if [ -d "${REGISTRY_DIR}" ] && [ -n "$(ls -A "${REGISTRY_DIR}" 2>/dev/null)" ]; then
-    echo "[SKIP] registry-center already exists, skipping download..."
+    if [ -f "${REGISTRY_DIR}/.source-version" ]; then
+        INSTALLED_REG_TAG="$(cat "${REGISTRY_DIR}/.source-version")"
+        if [ "${INSTALLED_REG_TAG}" != "${REGISTRY_VERSION}" ]; then
+            echo "[WARN] registry-center on disk is ${INSTALLED_REG_TAG}, but ${REGISTRY_VERSION} was requested."
+            echo "       Download skipped. To switch to ${REGISTRY_VERSION}: rm -rf registry-center and re-run."
+        else
+            echo "[SKIP] registry-center ${REGISTRY_VERSION} already exists, skipping download..."
+        fi
+    else
+        echo "[SKIP] registry-center already exists, skipping download (version unknown, no .source-version marker)."
+        echo "       To install ${REGISTRY_VERSION}: rm -rf registry-center and re-run."
+    fi
 else
     rm -rf "${REGISTRY_DIR}"
     echo "[DOWNLOAD] registry-center release ${REGISTRY_VERSION}..."
     TMP_TAR=$(mktemp /tmp/registry-center-XXXXXX.tar.gz)
-    if curl -fsSL "${REGISTRY_RELEASE_URL}" -o "${TMP_TAR}"; then
+    if curl -fsSL "${REGISTRY_SOURCE_URL}" -o "${TMP_TAR}"; then
         mkdir -p "${REGISTRY_DIR}"
         tar -xzf "${TMP_TAR}" -C "${REGISTRY_DIR}" --strip-components=1
+        echo "${REGISTRY_VERSION}" > "${REGISTRY_DIR}/.source-version"
         echo "  [OK] registry-center ${REGISTRY_VERSION} downloaded and extracted."
     else
-        echo "  [ERROR] Failed to download registry-center release."
+        echo "  [ERROR] Failed to download registry-center release ${REGISTRY_VERSION} from:"
+        echo "          ${REGISTRY_SOURCE_URL}"
         rm -f "${TMP_TAR}"
         exit 1
     fi
@@ -913,17 +1035,30 @@ fi
 
 if [ "${INSTALL_ORCHESTRATION}" = "true" ]; then
 if [ -d "${ORCHESTRATION_DIR}" ] && [ -n "$(ls -A "${ORCHESTRATION_DIR}" 2>/dev/null)" ]; then
-    echo "[SKIP] orchestration-center already exists, skipping download..."
+    if [ -f "${ORCHESTRATION_DIR}/.source-version" ]; then
+        INSTALLED_ORC_TAG="$(cat "${ORCHESTRATION_DIR}/.source-version")"
+        if [ "${INSTALLED_ORC_TAG}" != "${ORCHESTRATION_VERSION}" ]; then
+            echo "[WARN] orchestration-center on disk is ${INSTALLED_ORC_TAG}, but ${ORCHESTRATION_VERSION} was requested."
+            echo "       Download skipped. To switch to ${ORCHESTRATION_VERSION}: rm -rf orchestration-center and re-run."
+        else
+            echo "[SKIP] orchestration-center ${ORCHESTRATION_VERSION} already exists, skipping download..."
+        fi
+    else
+        echo "[SKIP] orchestration-center already exists, skipping download (version unknown, no .source-version marker)."
+        echo "       To install ${ORCHESTRATION_VERSION}: rm -rf orchestration-center and re-run."
+    fi
 else
     rm -rf "${ORCHESTRATION_DIR}"
     echo "[DOWNLOAD] orchestration-center release ${ORCHESTRATION_VERSION}..."
     TMP_TAR=$(mktemp /tmp/orchestration-center-XXXXXX.tar.gz)
-    if curl -fsSL "${ORCHESTRATION_RELEASE_URL}" -o "${TMP_TAR}"; then
+    if curl -fsSL "${ORCHESTRATION_SOURCE_URL}" -o "${TMP_TAR}"; then
         mkdir -p "${ORCHESTRATION_DIR}"
         tar -xzf "${TMP_TAR}" -C "${ORCHESTRATION_DIR}" --strip-components=1
+        echo "${ORCHESTRATION_VERSION}" > "${ORCHESTRATION_DIR}/.source-version"
         echo "  [OK] orchestration-center ${ORCHESTRATION_VERSION} downloaded and extracted."
     else
-        echo "  [ERROR] Failed to download orchestration-center release."
+        echo "  [ERROR] Failed to download orchestration-center release ${ORCHESTRATION_VERSION} from:"
+        echo "          ${ORCHESTRATION_SOURCE_URL}"
         rm -f "${TMP_TAR}"
         exit 1
     fi
@@ -961,17 +1096,25 @@ echo "[CERT] Generating self-signed certificates..."
 CERT_DIR="${REGISTRY_DIR}/etc/cert"
 mkdir -p "${CERT_DIR}"
 
-python3 -c "
+# CERT_PASSWORD is passed via the process environment, not the command line:
+# /proc/<pid>/cmdline is world-readable, environ is same-user/root only (ADR-023).
+CERT_DIR="${CERT_DIR}" CERT_PASSWORD="${CERT_PASSWORD}" python3 -c '
+import os
 import sys
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 from common.cert.certificate_generator import CertificateGenerator
 
-generator = CertificateGenerator(key_algorithm='RSA')
-if generator.generate_self_signed_cert('${CERT_DIR}', 'serverAuth', '${CERT_PASSWORD}'):
-    print('  [OK] Self-signed certificate generated in ${CERT_DIR}')
+cert_dir = os.environ["CERT_DIR"]
+cert_password = os.environ["CERT_PASSWORD"]
+generator = CertificateGenerator(key_algorithm="RSA")
+if generator.generate_self_signed_cert(cert_dir, "serverAuth", cert_password):
+    print(f"  [OK] Self-signed certificate generated in {cert_dir}")
 else:
-    print('  [SKIP] Certificate already exists')
-"
+    print("  [SKIP] Certificate already exists")
+'
+
+# Key is unencrypted at rest; protect it with 0600 permissions (ADR-023)
+chmod 600 "${CERT_DIR}/server_key_RSA.pem" 2>/dev/null || true
 
 # Prepare etc/ssl/ directory with certificate copies expected by server.conf.
 # generate_self_signed_cert creates server_RSA.cer and server_key_RSA.pem in etc/cert/,

@@ -1,10 +1,28 @@
 #!/bin/bash
+
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 # =============================================================================
 # OpenAN Uninstallation Script
 # Removes OpenAN project files, stops services, kills processes, and cleans
 # nginx configuration. Preserves environment tools (Python, Node.js, npm, nginx).
 #
-# Usage: ./openan_uninstall.sh [--force] [-h, --help]
+# Usage: ./uninstall.sh [--force] [-h, --help]
 # See ADR-007 for design decisions.
 # =============================================================================
 set -uo pipefail
@@ -16,7 +34,7 @@ FORCE=false
 
 print_usage() {
     cat << 'USAGE_EOF'
-Usage: openan_uninstall.sh [OPTIONS]
+Usage: uninstall.sh [OPTIONS]
 
 Uninstall OpenAN projects (registry-center, orchestration-center), stop all
 services, remove nginx configuration, and kill related processes.
@@ -27,8 +45,8 @@ Options:
   -h, --help    Show this help message and exit
 
 Examples:
-  ./openan_uninstall.sh           # Interactive confirmation
-  ./openan_uninstall.sh --force   # No confirmation (for automation)
+  ./uninstall.sh           # Interactive confirmation
+  ./uninstall.sh --force   # No confirmation (for automation)
 USAGE_EOF
 }
 
@@ -464,5 +482,5 @@ if [ -d "${WORK_DIR}/.node" ]; then
 fi
 echo ""
 echo " To reinstall OpenAN:"
-echo "   ./openan_install.sh"
+echo "   ./install.sh"
 echo "=========================================="
