@@ -59,13 +59,17 @@ The script handles all downloads, configuration, and service startup automatical
 
 #### 4. Choose installation mode (optional)
 
-The script uses `--reg` and `--orc` flags to select installation targets, consistent with `configure_llm.sh`'s flag design:
+The script selects installation targets with **general flags** (`--reg`, `--orc`), consistent with `configure_llm.sh`'s flag design. Version/URL flags are **specific flags**: each also selects its component and pins its source (ADR-024). Selection is the union of all component flags and is order-independent:
 
 | Flag | Description |
 |------|-------------|
-| `--reg` | Install registry-center |
-| `--orc` | Install orchestration-center |
-| (neither specified) | Default: install both (equivalent to `--reg --orc`) |
+| `--reg` | General: install registry-center (default version) |
+| `--orc` | General: install orchestration-center (default version) |
+| `--reg-version <tag>` | Specific: install registry-center and pin its source tag |
+| `--reg-url <url>` | Specific: install registry-center and pin its source URL |
+| `--orc-version <tag>` | Specific: install orchestration-center and pin its source tag |
+| `--orc-url <url>` | Specific: install orchestration-center and pin its source URL |
+| (no component flag) | Default: install both (equivalent to `--reg --orc`) |
 | `--sample` | Start agents examples server (port 8080, off by default) |
 | `-h` / `--help` | Show help and exit |
 
@@ -75,10 +79,13 @@ The script uses `--reg` and `--orc` flags to select installation targets, consis
 ./install.sh --reg               # Install only registry-center
 ./install.sh --orc               # Install only orchestration-center
 ./install.sh --reg --orc --sample # Install everything and start sample agents
+./install.sh --reg --orc-version v1.1.0 # registry-center (default) + orchestration-center v1.1.0
 ./install.sh --help              # Show help
 ```
 
-> In `--orc` mode (without `--reg`), the script prompts for the URL of the running registry-center (default `https://127.0.0.1:5000`). The URL is written as-is to `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion.
+> A specific flag is never ignored because another component's flag was used: `--reg --orc-version 1.0.0` installs registry-center (default version) **and** orchestration-center 1.0.0.
+
+> In orchestration-only mode (orchestration-center selected without registry-center — e.g. `--orc`, `--orc-version`, or `--orc-url` alone), the script prompts for the URL of the running registry-center (default `https://127.0.0.1:5000`). The URL is written as-is to `server.conf` and the `AGENT_REGISTRY_URL` environment variable — no `https→http` conversion.
 
 **Step comparison by mode:**
 
@@ -137,22 +144,22 @@ To completely uninstall OpenAN (stop all processes, clean nginx configuration, r
 
 Downloads and extracts from GitHub Release (using `curl` + `tar`, no `git clone` dependency).
 
-Defaults (overridable; precedence: flag > env var > built-in default):
+Defaults (overridable via flags; precedence: flag > built-in default):
 
 | Component | Download URL | Version |
 |-----------|-------------|---------|
 | registry-center | `https://github.com/project-openan/registry-center/archive/refs/tags/v1.0.0.tar.gz` | v1.0.0 |
 | orchestration-center | `https://github.com/project-openan/orchestration-center/archive/refs/tags/v1.0.0.tar.gz` | v1.0.0 |
 
-Override the tag or full URL per component (e.g. to pin a newer release or use a mirror):
+Override the tag or full URL per component (e.g. to pin a newer release or use a mirror). Version/URL flags also select their component (ADR-024):
 
 ```bash
-./install.sh --reg --reg-version v1.1.0                                # flag
-ORCHESTRATION_VERSION=1.1.0 ./install.sh --orc                          # env var ("v" prefix optional)
+./install.sh --reg --reg-version v1.1.0
 ./install.sh --reg --reg-version v1.1.0 --reg-url https://mirror.example.com/registry-center-v1.1.0.tar.gz
+./install.sh --reg --orc-version v1.1.0   # --orc-version also selects orchestration-center
 ```
 
-Environment equivalents: `REGISTRY_VERSION`, `ORCHESTRATION_VERSION`, `REGISTRY_SOURCE_URL`, `ORCHESTRATION_SOURCE_URL`. Run `./install.sh --help` for details.
+> Tags accept "v1.1.0" or "1.1.0" ("v" prefix optional). Run `./install.sh --help` for details.
 
 > If the directory already exists and is non-empty, the download is skipped. A `.source-version` marker records the installed tag; if it differs from the requested one, a warning with switch instructions is printed.
 

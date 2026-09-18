@@ -31,6 +31,9 @@
 #   ./pack.sh --reg        # Pack only registry-center
 #   ./pack.sh --orc        # Pack only orchestration-center
 #   ./pack.sh --reg --orc  # Pack both
+#   ./pack.sh --reg --orc-version v1.1.0
+#                          # Pack registry-center (default) + orchestration-center v1.1.0
+#                          # (--orc-version also selects orchestration-center, ADR-024)
 #
 # Prerequisites on the online machine:
 #   - Python 3.12+ (required)
@@ -48,10 +51,19 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # =============================================================================
-# Argument parsing: --reg | --orc | --help
+# Argument parsing: --reg | --orc | --help + version/URL flags
+# Component selection: every flag that names a component selects it.
+#   General flags:  --reg, --orc                          (default version)
+#   Specific flags: --reg-version/--reg-url, --orc-version/--orc-url
+#                                                         (pinned source)
+# Selection is the union of all component flags, is order-independent, and
+# defaults to both components when no component flag is given.
 # =============================================================================
-REG_FLAG_SET=false
-ORC_FLAG_SET=false
+# Track flag presence for order-independent selection
+REG_GENERAL=false        # --reg given
+ORC_GENERAL=false        # --orc given
+REG_SPECIFIED=false      # --reg-version or --reg-url given
+ORC_SPECIFIED=false      # --orc-version or --orc-url given
 PACK_REGISTRY=true
 PACK_ORCHESTRATION=true
 REG_VERSION_FLAG=""
@@ -63,63 +75,65 @@ print_usage() {
     cat << 'USAGE_EOF'
 Usage: pack.sh [OPTIONS]
 
-Options:
-  --reg            Pack registry-center
-  --orc            Pack orchestration-center
-                   (default: both --reg --orc if neither specified)
-  --reg-version <tag>  registry-center source tag (default: v1.0.0)
-  --orc-version <tag>  orchestration-center source tag (default: v1.0.0)
-  --reg-url <url>      registry-center source URL (default: derived from tag)
-  --orc-url <url>      orchestration-center source URL (default: derived from tag)
-  -h, --help       Show this help message and exit
+Component selection: every flag that names a component selects it.
+General flags select at the default version; specific flags select AND pin
+the source tag/URL. Selection is order-independent.
 
-Version overrides (precedence: flag > env var > built-in default):
-  Environment equivalents: REGISTRY_VERSION, ORCHESTRATION_VERSION,
-  REGISTRY_SOURCE_URL, ORCHESTRATION_SOURCE_URL
+Options:
+  --reg                Pack registry-center (default version)
+  --orc                Pack orchestration-center (default version)
+                       (default: both if no component flag is specified)
+  --reg-version <tag>  registry-center source tag (default: v1.0.0);
+                       also selects registry-center
+  --orc-version <tag>  orchestration-center source tag (default: v1.0.0);
+                       also selects orchestration-center
+  --reg-url <url>      registry-center source URL (default: derived from tag);
+                       also selects registry-center
+  --orc-url <url>      orchestration-center source URL (default: derived from tag);
+                       also selects orchestration-center
+  -h, --help           Show this help message and exit
+
+Version overrides (precedence: flag > built-in default):
   Tags accept "v1.1.0" or "1.1.0"; the tarball name strips the leading "v".
 
 Examples:
-  ./pack.sh                 # Pack everything (default: --reg --orc)
-  ./pack.sh --reg           # Pack only registry-center
-  ./pack.sh --orc           # Pack only orchestration-center
-  ./pack.sh --reg --orc     # Pack both
-  ./pack.sh --orc --orc-version v1.1.0   # Pack orchestration-center v1.1.0
-  ORCHESTRATION_VERSION=1.1.0 ./pack.sh --orc
+  ./pack.sh                              # Pack everything (default: --reg --orc)
+  ./pack.sh --reg                        # Pack only registry-center
+  ./pack.sh --orc                        # Pack only orchestration-center
+  ./pack.sh --reg --orc                  # Pack both
+  ./pack.sh --reg --orc-version v1.1.0   # registry-center (default) + orchestration-center v1.1.0
+  ./pack.sh --orc-version v1.1.0         # Pack only orchestration-center v1.1.0
 USAGE_EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --reg)
-            REG_FLAG_SET=true
-            PACK_REGISTRY=true
-            PACK_ORCHESTRATION=false
+            REG_GENERAL=true
             shift
             ;;
         --orc)
-            ORC_FLAG_SET=true
-            if [ "${REG_FLAG_SET}" = "true" ]; then
-                PACK_ORCHESTRATION=true
-            else
-                PACK_REGISTRY=false
-                PACK_ORCHESTRATION=true
-            fi
+            ORC_GENERAL=true
             shift
             ;;
         --reg-version)
             REG_VERSION_FLAG="$2"
+            REG_SPECIFIED=true
             shift 2
             ;;
         --orc-version)
             ORC_VERSION_FLAG="$2"
+            ORC_SPECIFIED=true
             shift 2
             ;;
         --reg-url)
             REG_URL_FLAG="$2"
+            REG_SPECIFIED=true
             shift 2
             ;;
         --orc-url)
             ORC_URL_FLAG="$2"
+            ORC_SPECIFIED=true
             shift 2
             ;;
         -h|--help)
@@ -139,8 +153,25 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# If neither --reg nor --orc was specified, default to both
-if [ "${REG_FLAG_SET}" = "false" ] && [ "${ORC_FLAG_SET}" = "false" ]; then
+# Component selection: union of general and specific flags (ADR-024).
+# A specific flag (--reg-version/--reg-url/--orc-version/--orc-url) selects
+# its component just like the general flag does, so e.g.
+#   ./pack.sh --reg --orc-version v1.0.0
+# packs registry-center (default version) AND orchestration-center v1.0.0.
+if [ "${REG_GENERAL}" = "true" ] || [ "${REG_SPECIFIED}" = "true" ]; then
+    PACK_REGISTRY=true
+else
+    PACK_REGISTRY=false
+fi
+if [ "${ORC_GENERAL}" = "true" ] || [ "${ORC_SPECIFIED}" = "true" ]; then
+    PACK_ORCHESTRATION=true
+else
+    PACK_ORCHESTRATION=false
+fi
+
+# No component flag at all -> pack both (consistent with one-click install.sh).
+if [ "${REG_GENERAL}" = "false" ] && [ "${ORC_GENERAL}" = "false" ] \
+   && [ "${REG_SPECIFIED}" = "false" ] && [ "${ORC_SPECIFIED}" = "false" ]; then
     PACK_REGISTRY=true
     PACK_ORCHESTRATION=true
 fi
@@ -153,7 +184,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 PYTHON_VERSION="3.12"
 
-# Built-in defaults, overridable via flags or env vars (precedence: flag > env > default)
+# Built-in defaults, overridable via flags (precedence: flag > default)
 DEFAULT_REGISTRY_VERSION="v1.0.0"
 DEFAULT_ORCHESTRATION_VERSION="v1.0.0"
 REGISTRY_SOURCE_BASE="https://github.com/project-openan/registry-center/archive/refs/tags"
@@ -170,17 +201,15 @@ normalize_tag() {
 
 # --- registry-center: tag ---
 REGISTRY_VERSION_SOURCE="default"
-if [ -n "${REGISTRY_VERSION:-}" ]; then REGISTRY_VERSION_SOURCE="env"; fi
 if [ -n "${REG_VERSION_FLAG}" ]; then REGISTRY_VERSION_SOURCE="flag"; fi
-REGISTRY_VERSION="$(normalize_tag "${REG_VERSION_FLAG:-${REGISTRY_VERSION:-${DEFAULT_REGISTRY_VERSION}}}")"
+REGISTRY_VERSION="$(normalize_tag "${REG_VERSION_FLAG:-${DEFAULT_REGISTRY_VERSION}}")"
 # Package (tarball) version is derived from the tag, with the leading "v" stripped
 REGISTRY_PKG_VERSION="${REGISTRY_VERSION#v}"
 
 # --- registry-center: source URL ---
 REGISTRY_URL_SOURCE="default"
-if [ -n "${REGISTRY_SOURCE_URL:-}" ]; then REGISTRY_URL_SOURCE="env"; fi
 if [ -n "${REG_URL_FLAG}" ]; then REGISTRY_URL_SOURCE="flag"; fi
-REGISTRY_SOURCE_URL="${REG_URL_FLAG:-${REGISTRY_SOURCE_URL:-${REGISTRY_SOURCE_BASE}/${REGISTRY_VERSION}.tar.gz}}"
+REGISTRY_SOURCE_URL="${REG_URL_FLAG:-${REGISTRY_SOURCE_BASE}/${REGISTRY_VERSION}.tar.gz}}"
 if [ "${REGISTRY_URL_SOURCE}" != "default" ]; then
     case "${REGISTRY_SOURCE_URL}" in
         *"${REGISTRY_VERSION}"*) ;;
@@ -192,16 +221,14 @@ fi
 
 # --- orchestration-center: tag ---
 ORCHESTRATION_VERSION_SOURCE="default"
-if [ -n "${ORCHESTRATION_VERSION:-}" ]; then ORCHESTRATION_VERSION_SOURCE="env"; fi
 if [ -n "${ORC_VERSION_FLAG}" ]; then ORCHESTRATION_VERSION_SOURCE="flag"; fi
-ORCHESTRATION_VERSION="$(normalize_tag "${ORC_VERSION_FLAG:-${ORCHESTRATION_VERSION:-${DEFAULT_ORCHESTRATION_VERSION}}}")"
+ORCHESTRATION_VERSION="$(normalize_tag "${ORC_VERSION_FLAG:-${DEFAULT_ORCHESTRATION_VERSION}}")"
 ORCHESTRATION_PKG_VERSION="${ORCHESTRATION_VERSION#v}"
 
 # --- orchestration-center: source URL ---
 ORCHESTRATION_URL_SOURCE="default"
-if [ -n "${ORCHESTRATION_SOURCE_URL:-}" ]; then ORCHESTRATION_URL_SOURCE="env"; fi
 if [ -n "${ORC_URL_FLAG}" ]; then ORCHESTRATION_URL_SOURCE="flag"; fi
-ORCHESTRATION_SOURCE_URL="${ORC_URL_FLAG:-${ORCHESTRATION_SOURCE_URL:-${ORCHESTRATION_SOURCE_BASE}/${ORCHESTRATION_VERSION}.tar.gz}}"
+ORCHESTRATION_SOURCE_URL="${ORC_URL_FLAG:-${ORCHESTRATION_SOURCE_BASE}/${ORCHESTRATION_VERSION}.tar.gz}}"
 if [ "${ORCHESTRATION_URL_SOURCE}" != "default" ]; then
     case "${ORCHESTRATION_SOURCE_URL}" in
         *"${ORCHESTRATION_VERSION}"*) ;;
@@ -553,7 +580,7 @@ echo ""
 echo -e "  Pack targets:"
 echo -e "    registry-center:       ${PACK_REGISTRY}"
 echo -e "    orchestration-center:  ${PACK_ORCHESTRATION}"
-echo -e "  Sources (flag > env > default):"
+echo -e "  Sources (flag > default):"
 echo -e "    registry-center:       ${REGISTRY_VERSION} (${REGISTRY_VERSION_SOURCE})"
 echo -e "      ${REGISTRY_SOURCE_URL} (${REGISTRY_URL_SOURCE})"
 echo -e "    orchestration-center:  ${ORCHESTRATION_VERSION} (${ORCHESTRATION_VERSION_SOURCE})"

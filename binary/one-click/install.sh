@@ -25,13 +25,19 @@
 set -euo pipefail
 
 # =============================================================================
-# Argument parsing: --reg | --orc | --sample | --help
-# --reg and --orc are boolean flags; if neither is specified, both are enabled.
-# This is consistent with configure_llm.sh's flag design.
+# Argument parsing: --reg | --orc | --sample | --help + version/URL flags
+# Component selection (ADR-024): every flag that names a component selects it.
+#   General flags:  --reg, --orc                          (default version)
+#   Specific flags: --reg-version/--reg-url, --orc-version/--orc-url
+#                                                         (pinned source)
+# Selection is the union of all component flags, is order-independent, and
+# defaults to both components when no component flag is given.
 # =============================================================================
-# Track whether --reg/--orc was explicitly specified
-REG_FLAG_SET=false
-ORC_FLAG_SET=false
+# Track flag presence for order-independent selection (ADR-024)
+REG_GENERAL=false        # --reg given
+ORC_GENERAL=false        # --orc given
+REG_SPECIFIED=false      # --reg-version or --reg-url given
+ORC_SPECIFIED=false      # --orc-version or --orc-url given
 INSTALL_REGISTRY=true
 INSTALL_ORCHESTRATION=true
 USER_REGISTRY_URL=""
@@ -45,48 +51,46 @@ print_usage() {
     cat << 'USAGE_EOF'
 Usage: install.sh [OPTIONS]
 
-Options:
-  --reg            Install registry-center
-  --orc            Install orchestration-center
-                   (default: both --reg --orc if neither specified)
-  --sample         Start agents examples server (port 8080, off by default)
-  --reg-version <tag>  registry-center source tag (default: v1.0.0)
-  --orc-version <tag>  orchestration-center source tag (default: v1.0.0)
-  --reg-url <url>      registry-center source URL (default: derived from tag)
-  --orc-url <url>      orchestration-center source URL (default: derived from tag)
-  -h, --help       Show this help message and exit
+Component selection (ADR-024): every flag that names a component selects it.
+General flags select at the default version; specific flags select AND pin
+the source tag/URL. Selection is order-independent.
 
-Version overrides (precedence: flag > env var > built-in default):
-  Environment equivalents: REGISTRY_VERSION, ORCHESTRATION_VERSION,
-  REGISTRY_SOURCE_URL, ORCHESTRATION_SOURCE_URL
+Options:
+  --reg                Install registry-center (default version)
+  --orc                Install orchestration-center (default version)
+                       (default: both if no component flag is specified)
+  --sample             Start agents examples server (port 8080, off by default)
+  --reg-version <tag>  registry-center source tag (default: v1.0.0);
+                       also selects registry-center
+  --orc-version <tag>  orchestration-center source tag (default: v1.0.0);
+                       also selects orchestration-center
+  --reg-url <url>      registry-center source URL (default: derived from tag);
+                       also selects registry-center
+  --orc-url <url>      orchestration-center source URL (default: derived from tag);
+                       also selects orchestration-center
+  -h, --help           Show this help message and exit
+
+Version overrides (precedence: flag > built-in default):
   Tags accept "v1.1.0" or "1.1.0".
 
 Examples:
-  ./install.sh                 # Install everything (default: --reg --orc)
-  ./install.sh --reg           # Install only registry-center
-  ./install.sh --orc           # Install only orchestration-center
-  ./install.sh --reg --orc --sample  # Install everything and start sample agents
-  ./install.sh --reg-version v1.1.0   # Install registry-center v1.1.0
-  ORCHESTRATION_VERSION=1.1.0 ./install.sh --orc
+  ./install.sh                              # Install everything (default: --reg --orc)
+  ./install.sh --reg                        # Install only registry-center
+  ./install.sh --orc                        # Install only orchestration-center
+  ./install.sh --reg --orc --sample         # Install everything and start sample agents
+  ./install.sh --reg --orc-version v1.1.0   # registry-center (default) + orchestration-center v1.1.0
+  ./install.sh --orc-version v1.1.0         # Install only orchestration-center v1.1.0
 USAGE_EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --reg)
-            REG_FLAG_SET=true
-            INSTALL_REGISTRY=true
-            INSTALL_ORCHESTRATION=false
+            REG_GENERAL=true
             shift
             ;;
         --orc)
-            ORC_FLAG_SET=true
-            if [ "${REG_FLAG_SET}" = "true" ]; then
-                INSTALL_ORCHESTRATION=true
-            else
-                INSTALL_REGISTRY=false
-                INSTALL_ORCHESTRATION=true
-            fi
+            ORC_GENERAL=true
             shift
             ;;
         --sample)
@@ -95,18 +99,22 @@ while [ $# -gt 0 ]; do
             ;;
         --reg-version)
             REG_VERSION_FLAG="$2"
+            REG_SPECIFIED=true
             shift 2
             ;;
         --orc-version)
             ORC_VERSION_FLAG="$2"
+            ORC_SPECIFIED=true
             shift 2
             ;;
         --reg-url)
             REG_URL_FLAG="$2"
+            REG_SPECIFIED=true
             shift 2
             ;;
         --orc-url)
             ORC_URL_FLAG="$2"
+            ORC_SPECIFIED=true
             shift 2
             ;;
         -h|--help)
@@ -136,9 +144,25 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# If neither --reg nor --orc was specified, default to both (consistent
-# with configure_llm.sh's default behavior).
-if [ "${REG_FLAG_SET}" = "false" ] && [ "${ORC_FLAG_SET}" = "false" ]; then
+# Component selection: union of general and specific flags (ADR-024).
+# A specific flag (--reg-version/--reg-url/--orc-version/--orc-url) selects
+# its component just like the general flag does, so e.g.
+#   ./install.sh --reg --orc-version v1.0.0
+# installs registry-center (default version) AND orchestration-center v1.0.0.
+if [ "${REG_GENERAL}" = "true" ] || [ "${REG_SPECIFIED}" = "true" ]; then
+    INSTALL_REGISTRY=true
+else
+    INSTALL_REGISTRY=false
+fi
+if [ "${ORC_GENERAL}" = "true" ] || [ "${ORC_SPECIFIED}" = "true" ]; then
+    INSTALL_ORCHESTRATION=true
+else
+    INSTALL_ORCHESTRATION=false
+fi
+
+# No component flag at all -> install both (consistent with configure_llm.sh).
+if [ "${REG_GENERAL}" = "false" ] && [ "${ORC_GENERAL}" = "false" ] \
+   && [ "${REG_SPECIFIED}" = "false" ] && [ "${ORC_SPECIFIED}" = "false" ]; then
     INSTALL_REGISTRY=true
     INSTALL_ORCHESTRATION=true
 fi
@@ -154,7 +178,7 @@ WORK_DIR="${SCRIPT_DIR}"
 
 # =============================================================================
 # Version / source URL resolution
-# Precedence: flag > env var > built-in default (same pattern as ADR-023)
+# Precedence: flag > built-in default
 # =============================================================================
 DEFAULT_REGISTRY_VERSION="v1.0.0"
 DEFAULT_ORCHESTRATION_VERSION="v1.0.0"
@@ -172,14 +196,12 @@ normalize_tag() {
 
 # --- registry-center ---
 REGISTRY_VERSION_SOURCE="default"
-if [ -n "${REGISTRY_VERSION:-}" ]; then REGISTRY_VERSION_SOURCE="env"; fi
 if [ -n "${REG_VERSION_FLAG}" ]; then REGISTRY_VERSION_SOURCE="flag"; fi
-REGISTRY_VERSION="$(normalize_tag "${REG_VERSION_FLAG:-${REGISTRY_VERSION:-${DEFAULT_REGISTRY_VERSION}}}")"
+REGISTRY_VERSION="$(normalize_tag "${REG_VERSION_FLAG:-${DEFAULT_REGISTRY_VERSION}}")"
 
 REGISTRY_URL_SOURCE="default"
-if [ -n "${REGISTRY_SOURCE_URL:-}" ]; then REGISTRY_URL_SOURCE="env"; fi
 if [ -n "${REG_URL_FLAG}" ]; then REGISTRY_URL_SOURCE="flag"; fi
-REGISTRY_SOURCE_URL="${REG_URL_FLAG:-${REGISTRY_SOURCE_URL:-${REGISTRY_SOURCE_BASE}/${REGISTRY_VERSION}.tar.gz}}"
+REGISTRY_SOURCE_URL="${REG_URL_FLAG:-${REGISTRY_SOURCE_BASE}/${REGISTRY_VERSION}.tar.gz}}"
 if [ "${REGISTRY_URL_SOURCE}" != "default" ]; then
     case "${REGISTRY_SOURCE_URL}" in
         *"${REGISTRY_VERSION}"*) ;;
@@ -191,14 +213,12 @@ fi
 
 # --- orchestration-center ---
 ORCHESTRATION_VERSION_SOURCE="default"
-if [ -n "${ORCHESTRATION_VERSION:-}" ]; then ORCHESTRATION_VERSION_SOURCE="env"; fi
 if [ -n "${ORC_VERSION_FLAG}" ]; then ORCHESTRATION_VERSION_SOURCE="flag"; fi
-ORCHESTRATION_VERSION="$(normalize_tag "${ORC_VERSION_FLAG:-${ORCHESTRATION_VERSION:-${DEFAULT_ORCHESTRATION_VERSION}}}")"
+ORCHESTRATION_VERSION="$(normalize_tag "${ORC_VERSION_FLAG:-${DEFAULT_ORCHESTRATION_VERSION}}")"
 
 ORCHESTRATION_URL_SOURCE="default"
-if [ -n "${ORCHESTRATION_SOURCE_URL:-}" ]; then ORCHESTRATION_URL_SOURCE="env"; fi
 if [ -n "${ORC_URL_FLAG}" ]; then ORCHESTRATION_URL_SOURCE="flag"; fi
-ORCHESTRATION_SOURCE_URL="${ORC_URL_FLAG:-${ORCHESTRATION_SOURCE_URL:-${ORCHESTRATION_SOURCE_BASE}/${ORCHESTRATION_VERSION}.tar.gz}}"
+ORCHESTRATION_SOURCE_URL="${ORC_URL_FLAG:-${ORCHESTRATION_SOURCE_BASE}/${ORCHESTRATION_VERSION}.tar.gz}}"
 if [ "${ORCHESTRATION_URL_SOURCE}" != "default" ]; then
     case "${ORCHESTRATION_SOURCE_URL}" in
         *"${ORCHESTRATION_VERSION}"*) ;;
@@ -212,7 +232,7 @@ echo "[MODE] Install targets:"
 echo "       registry-center:       ${INSTALL_REGISTRY}"
 echo "       orchestration-center:  ${INSTALL_ORCHESTRATION}"
 echo "       agents sample:         ${START_SAMPLE}"
-echo "       sources (flag > env > default):"
+echo "       sources (flag > default):"
 echo "         registry-center:       ${REGISTRY_VERSION} (${REGISTRY_VERSION_SOURCE})"
 echo "           ${REGISTRY_SOURCE_URL} (${REGISTRY_URL_SOURCE})"
 echo "         orchestration-center:  ${ORCHESTRATION_VERSION} (${ORCHESTRATION_VERSION_SOURCE})"

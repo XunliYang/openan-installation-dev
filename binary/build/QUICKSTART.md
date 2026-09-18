@@ -75,13 +75,17 @@ chmod +x pack.sh
 ./pack.sh              # Pack both components (default)
 ```
 
-Or pack individual components:
+Or pack individual components. Version/URL flags (`--reg-version`, `--reg-url`, `--orc-version`, `--orc-url`) are **specific flags**: each also selects its component and pins its source (ADR-024). Selection is the union of all component flags and is order-independent:
 
 | Flag | Description |
 |------|-------------|
-| `--reg` | Pack only registry-center |
-| `--orc` | Pack only orchestration-center |
-| (neither specified) | Default: pack both (equivalent to `--reg --orc`) |
+| `--reg` | General: pack only registry-center (default version) |
+| `--orc` | General: pack only orchestration-center (default version) |
+| `--reg-version <tag>` | Specific: pack registry-center and pin its source tag |
+| `--reg-url <url>` | Specific: pack registry-center and pin its source URL |
+| `--orc-version <tag>` | Specific: pack orchestration-center and pin its source tag |
+| `--orc-url <url>` | Specific: pack orchestration-center and pin its source URL |
+| (no component flag) | Default: pack both (equivalent to `--reg --orc`) |
 | `-h` / `--help` | Show help and exit |
 
 ```bash
@@ -90,6 +94,7 @@ Or pack individual components:
 ./pack.sh --reg              # Pack only registry-center
 ./pack.sh --orc              # Pack only orchestration-center
 ./pack.sh --reg --orc        # Pack both
+./pack.sh --reg --orc-version v1.1.0  # registry-center (default) + orchestration-center v1.1.0
 ./pack.sh --help             # Show help
 ```
 
